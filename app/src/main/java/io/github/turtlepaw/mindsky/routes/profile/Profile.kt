@@ -1,6 +1,7 @@
 package io.github.turtlepaw.mindsky.routes.profile
 
 import android.annotation.SuppressLint
+import androidx.activity.compose.PredictiveBackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -22,6 +23,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.MoreHoriz
 import androidx.compose.material.icons.rounded.Repeat
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonColors
@@ -30,6 +32,8 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
@@ -38,8 +42,10 @@ import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
+import androidx.compose.material3.ToggleButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
@@ -88,6 +94,7 @@ import io.github.turtlepaw.mindsky.components.post.getDisplayName
 import io.github.turtlepaw.mindsky.components.post.hiddenLabels
 import io.github.turtlepaw.mindsky.components.post.rememberLoadingColor
 import io.github.turtlepaw.mindsky.di.LocalFeedModel
+import io.github.turtlepaw.mindsky.di.LocalIdentityProvider
 import io.github.turtlepaw.mindsky.di.LocalLabelManager
 import io.github.turtlepaw.mindsky.di.LocalMindskyApi
 import io.github.turtlepaw.mindsky.di.LocalNavController
@@ -97,6 +104,7 @@ import io.github.turtlepaw.mindsky.di.LocalSessionManager
 import io.github.turtlepaw.mindsky.routes.Loading
 import io.github.turtlepaw.mindsky.utils.Formatters
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.collect
 import sh.christian.ozone.api.Did
 import java.time.Instant
 import java.time.ZoneId
@@ -160,106 +168,110 @@ fun BadgeInformationSheet(
                         },
                     ).load()
 
-                        Text("This account has been verified by trusted sources.")
-                        if (accounts.isLoading) {
-                            repeat(2){
-                                Column(
-                                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(8.dp)
-                                    ) {
-                                        val color = rememberLoadingColor()
-                                        Box(
-                                            modifier = Modifier
-                                                .size(40.dp)
-                                                .background(
-                                                    color,
-                                                    CircleShape
-                                                )
-                                        )
-                                        Box(
-                                            modifier = Modifier
-                                                .height(20.dp)
-                                                .fillMaxWidth(0.5f)
-                                                .background(
-                                                    color,
-                                                    RoundedCornerShape(8.dp)
-                                                )
-                                        )
-                                    }
-                                }
-                            }
-                        } else if (accounts.error != null) {
-                            Text("Failed to load verification data: ${accounts.error!!.message}")
-                        } else {
+                    Text("This account has been verified by trusted sources.")
+                    if (accounts.isLoading) {
+                        repeat(2) {
                             Column(
                                 verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                accounts.value.values.forEach { account ->
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(8.dp)
+                                ) {
+                                    val color = rememberLoadingColor()
+                                    Box(
                                         modifier = Modifier
-                                            .fillMaxWidth()
-                                            .clip(
-                                                MaterialTheme.shapes.medium
+                                            .size(40.dp)
+                                            .background(
+                                                color,
+                                                CircleShape
                                             )
-                                            .clickable {
-                                                scope.launch { sheetState.hide() }.invokeOnCompletion {
-                                                    onDismiss()
-                                                    navigator.navigate(
-                                                        ProfileDestination(account.did.did)
-                                                    )
-                                                }
-                                            }
-                                            .padding(10.dp)
-                                    ) {
-                                        Avatar(
-                                            avatarUrl = account.avatar?.uri,
-                                            contentDescription = "${account.displayName}'s avatar",
-                                            clip = CircleShape,
-                                            modifier = Modifier.size(40.dp)
+                                    )
+                                    Box(
+                                        modifier = Modifier
+                                            .height(20.dp)
+                                            .fillMaxWidth(0.5f)
+                                            .background(
+                                                color,
+                                                RoundedCornerShape(8.dp)
+                                            )
+                                    )
+                                }
+                            }
+                        }
+                    } else if (accounts.error != null) {
+                        Text("Failed to load verification data: ${accounts.error!!.message}")
+                    } else {
+                        Column(
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            accounts.value.values.forEach { account ->
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(
+                                            MaterialTheme.shapes.medium
                                         )
-                                        Column() {
-                                            Text(account.displayName ?: account.handle.handle, style = MaterialTheme.typography.bodyMedium)
-                                            val verification = profileData.verification?.verifications?.find { it.issuer == account.did }
-                                            if(verification != null){
-                                                val formatter = DateTimeFormatter
-                                                    .ofPattern("MMMM d, yyyy")
-                                                    .withZone(ZoneId.systemDefault())
-                                                Text(
-                                                    formatter.format(
-                                                        Instant.ofEpochMilli(verification.createdAt.epochSeconds)
-                                                    ),
-                                                    style = MaterialTheme.typography.bodySmall.copy(
-                                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                                    )
+                                        .clickable {
+                                            scope.launch { sheetState.hide() }.invokeOnCompletion {
+                                                onDismiss()
+                                                navigator.navigate(
+                                                    ProfileDestination(account.did.did)
                                                 )
                                             }
+                                        }
+                                        .padding(10.dp)
+                                ) {
+                                    Avatar(
+                                        avatarUrl = account.avatar?.uri,
+                                        contentDescription = "${account.displayName}'s avatar",
+                                        clip = CircleShape,
+                                        modifier = Modifier.size(40.dp)
+                                    )
+                                    Column() {
+                                        Text(
+                                            account.displayName ?: account.handle.handle,
+                                            style = MaterialTheme.typography.bodyMedium
+                                        )
+                                        val verification =
+                                            profileData.verification?.verifications?.find { it.issuer == account.did }
+                                        if (verification != null) {
+                                            val formatter = DateTimeFormatter
+                                                .ofPattern("MMMM d, yyyy")
+                                                .withZone(ZoneId.systemDefault())
+                                            Text(
+                                                formatter.format(
+                                                    Instant.ofEpochMilli(verification.createdAt.epochSeconds)
+                                                ),
+                                                style = MaterialTheme.typography.bodySmall.copy(
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            )
                                         }
                                     }
                                 }
                             }
                         }
-                }
-                    Button(
-                        onClick = {
-                            scope.launch { sheetState.hide() }.invokeOnCompletion {
-                                onDismiss()
-                            }
-                        },
-                        colors = ButtonDefaults.elevatedButtonColors(),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text("Okay")
                     }
                 }
+                Button(
+                    onClick = {
+                        scope.launch { sheetState.hide() }.invokeOnCompletion {
+                            onDismiss()
+                        }
+                    },
+                    colors = ButtonDefaults.elevatedButtonColors(),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Okay")
+                }
             }
+        }
     }
 }
 
@@ -278,6 +290,10 @@ fun Profile(navigator: DestinationsNavigator, identity: String) {
     val scrollToTopHandler = LocalScrollToTop.current
     val coroutineScope = rememberCoroutineScope()
     var badgeShown by remember { mutableStateOf<BadgeInfoType?>(null) }
+    PredictiveBackHandler(enabled = hasBackStack) { progress ->
+        progress.collect { }
+        navigator.navigateUp()
+    }
 
     DisposableEffect(listState) {
         val handler: () -> Unit = {
@@ -324,306 +340,333 @@ fun Profile(navigator: DestinationsNavigator, identity: String) {
         )
     }
 
-    Scaffold {
-        LazyColumn(state = listState) {
-            if (isLoading) {
-                item {
-                    val color = rememberLoadingColor()
-                    ProfileStructure(
-                        banner = {
-                            Box(
-                                modifier = it.background(
-                                    color
-                                )
-                            )
-                        },
-                        avatar = {
-                            Box(
-                                modifier = it
-                                    .background(
-                                        color,
-                                        CircleShape
+    Scaffold { paddingValues ->
+        CompositionLocalProvider(
+            LocalIdentityProvider provides Did(identity)
+        ) {
+            LazyColumn(
+                state = listState,
+            ) {
+                if (isLoading) {
+                    item {
+                        val color = rememberLoadingColor()
+                        ProfileStructure(
+                            banner = {
+                                Box(
+                                    modifier = it.background(
+                                        color
                                     )
-                            )
-                        },
-                        navigator = navigator,
-                        showBackButton = hasBackStack,
-                        avatarOnClick = null
-                    )
-                }
-            } else if (profileData == null) {
-                item {
-                    Text("Failed to load profile")
-                }
-            } else {
-                item {
-                    ProfileStructure(
-                        banner = {
-                            if (profileData!!.banner?.uri != null)
-                                AsyncImage(
-                                    model = profileData!!.banner?.uri,
-                                    contentDescription = "${profileData!!.displayName}'s banner",
+                                )
+                            },
+                            avatar = {
+                                Box(
+                                    modifier = it
+                                        .background(
+                                            color,
+                                            CircleShape
+                                        )
+                                )
+                            },
+                            actions = {},
+                            navigator = navigator,
+                            showBackButton = hasBackStack,
+                            avatarOnClick = null
+                        )
+                    }
+                } else if (profileData == null) {
+                    item {
+                        Text("Failed to load profile")
+                    }
+                } else {
+                    item {
+                        ProfileStructure(
+                            banner = {
+                                if (profileData!!.banner?.uri != null)
+                                    AsyncImage(
+                                        model = profileData!!.banner?.uri,
+                                        contentDescription = "${profileData!!.displayName}'s banner",
+                                        contentScale = ContentScale.Crop,
+                                        modifier = it
+                                    )
+                                else AsyncImage(
+                                    model = profileData!!.avatar?.uri,
+                                    contentDescription = "${profileData!!.displayName}'s avatar",
                                     contentScale = ContentScale.Crop,
                                     modifier = it
+                                        .blur(100.dp)
+                                        .graphicsLayer {
+                                            alpha = 0.3f
+                                        }
                                 )
-                            else AsyncImage(
-                                model = profileData!!.avatar?.uri,
-                                contentDescription = "${profileData!!.displayName}'s avatar",
-                                contentScale = ContentScale.Crop,
-                                modifier = it
-                                    .blur(100.dp)
-                                    .graphicsLayer {
-                                        alpha = 0.3f
+                            },
+                            avatar = {
+                                Avatar(
+                                    avatarUrl = profileData!!.avatar?.uri,
+                                    contentDescription = profileData!!.displayName,
+                                    clip = CircleShape,
+                                    modifier = it
+                                )
+                            },
+                            actions = {
+                                Row {
+                                    ToggleButton(
+                                        checked = profileData!!.viewer?.following == null,
+                                        onCheckedChange = {}
+                                    ) {
+                                        Text(
+                                            if (profileData!!.viewer?.following != null) "Following" else "Follow",
+                                            style = MaterialTheme.typography.bodyMedium
+                                        )
                                     }
-                            )
-                        },
-                        avatar = {
-                            Avatar(
-                                avatarUrl = profileData!!.avatar?.uri,
-                                contentDescription = profileData!!.displayName,
-                                clip = CircleShape,
-                                modifier = it
-                            )
-                        },
-                        showBackButton = hasBackStack,
-                        navigator = navigator,
-                    ) {
-                        val avatar = profileData!!.avatar?.uri
-                        if (avatar != null) {
-                            navigator.navigate(
-                                ImageDestination(avatar, null)
-                            )
-                        }
-                    }
-                }
-                item {
-                    Spacer(modifier = Modifier.height(16.dp))
-                }
-                item {
-                    Row(
-                        modifier = Modifier.padding(start = startPadding),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            profileData!!.displayName ?: profileData!!.handle.handle,
-                            style = MaterialTheme.typography.headlineMedium,
-                        )
-                        if (profileData!!.labels.find { it.`val` == "bot" } != null) {
-                            Robot(Modifier
-                                .size(25.dp)
-                                .clickable {
-                                    badgeShown = BadgeInfoType.Bot
-                                })
-                        }
-                        if (profileData!!.verification?.verifications?.isNotEmpty() == true) {
-                            Checkmark(
-                                Modifier
-                                    .size(25.dp)
-                                    .clickable {
-                                        badgeShown = BadgeInfoType.Verified
+                                    IconButton(
+                                        onClick = {},
+                                        colors = IconButtonDefaults.filledTonalIconButtonColors()
+                                    ) {
+                                        Icon(Icons.Rounded.MoreHoriz, contentDescription = "More options")
                                     }
-                            )
-                        }
-                    }
-                }
-                item {
-                    FlowRow(
-                        modifier = Modifier.padding(start = startPadding)
-                    ) {
-                        if (profileData!!.viewer?.followedBy != null) {
-                            Box(
-                                modifier = Modifier
-                                    .padding(end = 5.dp)
-                                    .background(
-                                        MaterialTheme.colorScheme.surfaceContainer,
-                                        RoundedCornerShape(8.dp)
-                                    )
-                                    .border(
-                                        width = 0.5.dp,
-                                        color = MaterialTheme.colorScheme.outlineVariant,
-                                        shape = RoundedCornerShape(8.dp)
-                                    )
-                                    .padding(horizontal = 8.dp, vertical = 4.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text("Follows you", style = MaterialTheme.typography.bodySmall)
+                                }
+                            },
+                            showBackButton = hasBackStack,
+                            navigator = navigator,
+                        ) {
+                            val avatar = profileData!!.avatar?.uri
+                            if (avatar != null) {
+                                navigator.navigate(
+                                    ImageDestination(avatar, null)
+                                )
                             }
                         }
-
-                        Text(
-                            "@${profileData!!.handle.handle}",
-                            style = MaterialTheme.typography.bodyMedium.copy(
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            ),
-                        )
                     }
-                }
-                item {
-                    Spacer(modifier = Modifier.height(10.dp))
-                }
-                item {
-                    FlowRow(
-                        modifier = Modifier.padding(start = startPadding),
-                        horizontalArrangement = Arrangement.spacedBy(5.dp),
-                        verticalArrangement = Arrangement.spacedBy(
-                            5.dp,
-                            Alignment.CenterVertically
-                        )
-                    ) {
-                        val followingText = stringResource(R.string.following)
-                        val followersText = stringResource(R.string.followers)
-                        val boldText =
-                            MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold)
-                        val accessoryText =
-                            MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text(
-                            buildAnnotatedString {
-                                withStyle(boldText.toSpanStyle()) {
-                                    append(Formatters.formatCompactNumber(profileData!!.followersCount!!.toInt()))
-                                }
-                                withStyle(style = accessoryText.toSpanStyle()) {
-                                    append(" ")
-                                    append(followersText.lowercase())
-                                }
-                            },
-                            style = MaterialTheme.typography.bodyMedium,
-                        )
-                        Text(
-                            buildAnnotatedString {
-                                withStyle(boldText.toSpanStyle()) {
-                                    append(Formatters.formatCompactNumber(profileData!!.followsCount!!.toInt()))
-                                }
-                                withStyle(style = accessoryText.toSpanStyle()) {
-                                    append(" ")
-                                    append(followingText.lowercase())
-                                }
-                            },
-                            style = MaterialTheme.typography.bodyMedium,
-                        )
+                    item {
+                        Spacer(modifier = Modifier.height(16.dp))
                     }
-                }
-                item {
-                    Spacer(modifier = Modifier.height(16.dp))
-                }
-                item {
-                    Text(
-                        profileData!!.description ?: "",
-                        modifier = Modifier.padding(start = startPadding),
-                    )
-                }
-                item {
-                    Spacer(modifier = Modifier.height(16.dp))
-                }
-                item {
-                    val followedBy = profileData!!.viewer?.knownFollowers
-                    if (followedBy != null && identity != userDid) {
+                    item {
                         Row(
                             modifier = Modifier.padding(start = startPadding),
-                            horizontalArrangement = Arrangement.spacedBy(46.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            val trimmedFollowedBy = followedBy.followers.take(3)
-                            AvatarStack(
-                                items = trimmedFollowedBy,
-                            ) {
+                            Text(
+                                profileData!!.displayName ?: profileData!!.handle.handle,
+                                style = MaterialTheme.typography.headlineMedium,
+                            )
+                            if (profileData!!.labels.find { it.`val` == "bot" } != null) {
+                                Robot(
+                                    Modifier
+                                        .size(25.dp)
+                                        .clickable {
+                                            badgeShown = BadgeInfoType.Bot
+                                        })
+                            }
+                            if (profileData!!.verification?.verifications?.isNotEmpty() == true) {
+                                Checkmark(
+                                    Modifier
+                                        .size(25.dp)
+                                        .clickable {
+                                            badgeShown = BadgeInfoType.Verified
+                                        }
+                                )
+                            }
+                        }
+                    }
+                    item {
+                        FlowRow(
+                            modifier = Modifier.padding(start = startPadding)
+                        ) {
+                            if (profileData!!.viewer?.followedBy != null) {
                                 Box(
                                     modifier = Modifier
-                                        .size(38.dp)
-                                        .clip(CircleShape)
-                                        .background(MaterialTheme.colorScheme.surface)
-                                        .padding(3.dp)
+                                        .padding(end = 5.dp)
+                                        .background(
+                                            MaterialTheme.colorScheme.surfaceContainer,
+                                            RoundedCornerShape(8.dp)
+                                        )
+                                        .border(
+                                            width = 0.5.dp,
+                                            color = MaterialTheme.colorScheme.outlineVariant.copy(0.2f),
+                                            shape = RoundedCornerShape(8.dp)
+                                        )
+                                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                                    contentAlignment = Alignment.Center
                                 ) {
-                                    Avatar(
-                                        modifier = Modifier.fillMaxSize(),
-                                        avatarUrl = it.avatar?.uri,
-                                        contentDescription = "${it.displayName ?: it.handle}'s avatar",
-                                        clip = CircleShape,
-                                    )
+                                    Text("Follows you", style = MaterialTheme.typography.bodySmall)
                                 }
                             }
-                            val names = followedBy.followers.take(2)
-                                .joinToString(", ") { it.displayName ?: it.handle }
-                            val text =
-                                if (followedBy.followers.size > 2) "$names, and ${followedBy.followers.size} others" else names
 
                             Text(
-                                "Followed by $text",
-                                style = MaterialTheme.typography.bodySmall.copy(
-                                    color = MaterialTheme.colorScheme.onSurface.copy(0.9f)
-                                )
+                                "@${profileData!!.handle.handle}",
+                                style = MaterialTheme.typography.bodyMedium.copy(
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                ),
+                            )
+
+// pronouns
+                        }
+                    }
+                    item {
+                        Spacer(modifier = Modifier.height(10.dp))
+                    }
+                    item {
+                        FlowRow(
+                            modifier = Modifier.padding(start = startPadding),
+                            horizontalArrangement = Arrangement.spacedBy(5.dp),
+                            verticalArrangement = Arrangement.spacedBy(
+                                5.dp,
+                                Alignment.CenterVertically
+                            )
+                        ) {
+                            val followingText = stringResource(R.string.following)
+                            val followersText = stringResource(R.string.followers)
+                            val boldText =
+                                MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold)
+                            val accessoryText =
+                                MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(
+                                buildAnnotatedString {
+                                    withStyle(boldText.toSpanStyle()) {
+                                        append(Formatters.formatCompactNumber(profileData!!.followersCount!!.toInt()))
+                                    }
+                                    withStyle(style = accessoryText.toSpanStyle()) {
+                                        append(" ")
+                                        append(followersText.lowercase())
+                                    }
+                                },
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                            Text(
+                                buildAnnotatedString {
+                                    withStyle(boldText.toSpanStyle()) {
+                                        append(Formatters.formatCompactNumber(profileData!!.followsCount!!.toInt()))
+                                    }
+                                    withStyle(style = accessoryText.toSpanStyle()) {
+                                        append(" ")
+                                        append(followingText.lowercase())
+                                    }
+                                },
+                                style = MaterialTheme.typography.bodyMedium,
                             )
                         }
-                        Spacer(modifier = Modifier.height(12.dp))
                     }
-                }
-                item {
-                    Box(
-                        modifier = Modifier.padding(start = startPadding)
-                    ) {
-                        Labelers(profileData!!.labels, true)
+                    item {
+                        Spacer(modifier = Modifier.height(16.dp))
                     }
-                }
-                item {
-                    Spacer(modifier = Modifier.height(15.dp))
+                    item {
+                        Text(
+                            profileData!!.description ?: "",
+                            modifier = Modifier.padding(start = startPadding),
+                        )
+                    }
+                    item {
+                        Spacer(modifier = Modifier.height(16.dp))
+                    }
+                    item {
+                        val followedBy = profileData!!.viewer?.knownFollowers
+                        if (followedBy != null && identity != userDid) {
+                            Row(
+                                modifier = Modifier.padding(start = startPadding),
+                                horizontalArrangement = Arrangement.spacedBy(46.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                val trimmedFollowedBy = followedBy.followers.take(3)
+                                AvatarStack(
+                                    items = trimmedFollowedBy,
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(38.dp)
+                                            .clip(CircleShape)
+                                            .background(MaterialTheme.colorScheme.surface)
+                                            .padding(3.dp)
+                                    ) {
+                                        Avatar(
+                                            modifier = Modifier.fillMaxSize(),
+                                            avatarUrl = it.avatar?.uri,
+                                            contentDescription = "${it.displayName ?: it.handle}'s avatar",
+                                            clip = CircleShape,
+                                        )
+                                    }
+                                }
+                                val names = followedBy.followers.take(2)
+                                    .joinToString(", ") { it.displayName ?: it.handle }
+                                val text =
+                                    if (followedBy.followers.size > 2) "$names, and ${followedBy.followers.size} others" else names
+
+                                Text(
+                                    "Followed by $text",
+                                    style = MaterialTheme.typography.bodySmall.copy(
+                                        color = MaterialTheme.colorScheme.onSurface.copy(0.9f)
+                                    )
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(12.dp))
+                        }
+                    }
+                    item {
+                        Box(
+                            modifier = Modifier.padding(start = startPadding)
+                        ) {
+                            Labelers(profileData!!.labels, true)
+                        }
+                    }
+                    item {
+                        Spacer(modifier = Modifier.height(15.dp))
 //                    HorizontalDivider(
 //                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.2f),
 //                        thickness = 0.5.dp
 //                    )
-                    PrimaryTabRow(selectedTabIndex = selectedDestination, modifier = Modifier) {
-                        destinations.forEachIndexed { index, destination ->
-                            Tab(
-                                selected = selectedDestination == index,
-                                onClick = {
-                                    selectedDestination = index
-                                },
-                                text = {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                    ) {
-                                        if (destination.icon != null) {
-                                            Icon(
-                                                painter = painterResource(destination.icon),
-                                                contentDescription = destination.label,
-                                                modifier = Modifier.size(18.dp),
-                                                tint = LocalContentColor.current
+                        PrimaryTabRow(selectedTabIndex = selectedDestination, modifier = Modifier) {
+                            destinations.forEachIndexed { index, destination ->
+                                Tab(
+                                    selected = selectedDestination == index,
+                                    onClick = {
+                                        selectedDestination = index
+                                    },
+                                    text = {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            if (destination.icon != null) {
+                                                Icon(
+                                                    painter = painterResource(destination.icon),
+                                                    contentDescription = destination.label,
+                                                    modifier = Modifier.size(18.dp),
+                                                    tint = LocalContentColor.current
+                                                )
+                                            }
+                                            Text(
+                                                text = destination.label,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
                                             )
                                         }
-                                        Text(
-                                            text = destination.label,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
                                     }
-                                }
-                            )
+                                )
+                            }
                         }
                     }
-                }
-
-                if (selectedDestination == 0) {
-                    ProfilePosts(posts, navigator)
-                } else {
-                    tangled(identity, navigator)
+                    if (selectedDestination == 0) {
+                        ProfilePosts(posts, navigator)
+                    } else {
+                        tangled(identity, navigator)
+                    }
                 }
             }
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(150.dp)
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                MaterialTheme.colorScheme.surface.copy(alpha = 0.8f),
+                                MaterialTheme.colorScheme.surface.copy(alpha = 0.2f),
+                                Color.Transparent
+                            )
+                        )
+                    )
+            )
         }
     }
-
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(100.dp)
-            .background(
-                Brush.verticalGradient(
-                    colors = listOf(
-                        MaterialTheme.colorScheme.surface.copy(alpha = 0.8f),
-                        MaterialTheme.colorScheme.surface.copy(alpha = 0.2f),
-                        Color.Transparent
-                    )
-                )
-            )
-    )
 }
 
 private data class RememberedPosts(
@@ -660,7 +703,10 @@ private fun LazyListScope.ProfilePosts(
         Loading()
     } else {
         items(posts.posts.value) {
-            PostComponent(it, navigator) {
+            PostComponent(
+                it,
+                navigator
+            ) {
                 navigator.navigate(
                     FullsizePostDestination(postUri = it.post.uri.atUri)
                 )

@@ -19,8 +19,8 @@ data class LoadResult<V>(
     val error: String?
 )
 
-class Cache<V>(
-    private val fetcher: suspend (key: String) -> V,
+class Cache<K, V>(
+    private val fetcher: suspend (key: K) -> V,
     private val serializer: KSerializer<V>,
     private val identifier: String,
     context: Context
@@ -37,7 +37,7 @@ class Cache<V>(
         }
     }
 
-    suspend fun loadAsync(key: String, context: Context): LoadResult<V> {
+    suspend fun loadAsync(key: K, context: Context): LoadResult<V> {
         var value: V? = null
         var isLoading = true
         var error: String? = null
@@ -45,7 +45,7 @@ class Cache<V>(
         try {
             value = fetcher(key)
             mutex.withLock {
-                memory[key] = value!!
+                memory[key.toString()] = value!!
                 persistResult(context)
             }
         } catch (e: Exception) {
@@ -61,8 +61,8 @@ class Cache<V>(
     }
 
     @Composable
-    fun load(key: String): LoadResult<V> {
-        var value: V? by remember { mutableStateOf(memory[key]) }
+    fun load(key: K): LoadResult<V> {
+        var value: V? by remember { mutableStateOf(memory[key.toString()]) }
         var isLoading by remember { mutableStateOf(value == null) }
         var error by remember { mutableStateOf<String?>(null) }
         val context = LocalContext.current
@@ -70,7 +70,7 @@ class Cache<V>(
         LaunchedEffect(key) {
             try {
                 value = fetcher(key)
-                memory[key] = value!!
+                memory[key.toString()] = value!!
                 persistResult(context)
             } catch (e: Exception) {
                 error = e.message

@@ -16,6 +16,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Public
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.CircularWavyProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -23,6 +25,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -45,12 +48,11 @@ import io.github.turtlepaw.mindsky.replaceCurrent
 import io.github.turtlepaw.mindsky.routes.settings.TopAppBarCommon
 import io.github.turtlepaw.mindsky.viewmodels.rememberAuthViewModel
 
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Destination<RootGraph>
 @Composable
-fun Login(navigator: DestinationsNavigator) {
+fun Login(navigator: DestinationsNavigator, pds: String) {
     val viewModel = rememberOnboardingViewModel()
-
-    var handle by remember { mutableStateOf("") }
     val context = LocalContext.current
 
     val authViewModel = rememberAuthViewModel()
@@ -58,7 +60,7 @@ fun Login(navigator: DestinationsNavigator) {
     val isLoading = authState == AuthState.Loading
     val errorMessage = (authState as? AuthState.Error)?.message
 
-    androidx.compose.runtime.LaunchedEffect(authState) {
+    LaunchedEffect(authState) {
         if (authState is AuthState.Authenticated) {
             val session = (authState as AuthState.Authenticated).session
             val application = context.applicationContext as MindskyApplication
@@ -66,6 +68,10 @@ fun Login(navigator: DestinationsNavigator) {
             navigator.popBackStack()
             navigator.replaceCurrent(DownloadModelDestination)
         }
+    }
+
+    LaunchedEffect(Unit) {
+        authViewModel.startOAuthFlow(pds)
     }
 
     Scaffold(
@@ -83,8 +89,15 @@ fun Login(navigator: DestinationsNavigator) {
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center
         ) {
+            if(isLoading) {
+                CircularWavyProgressIndicator()
+                Spacer(
+                    modifier = Modifier.height(30.dp)
+                )
+            }
+
             Text(
-                "Login to",
+                if(isLoading) "Logging into" else "Login to",
                 style = MaterialTheme.typography.titleSmall
             )
 
@@ -107,78 +120,32 @@ fun Login(navigator: DestinationsNavigator) {
                     horizontalAlignment = if (pds == null) Alignment.CenterHorizontally else Alignment.Start,
                 ) {
                     Text(
-                        pds?.name ?: "Custom PDS",
+                        pds?.name ?: pds?.url ?: viewModel.pds,
                         style = MaterialTheme.typography.titleLarge
                     )
+//                    Text(
+//                        pds?.url ?: viewModel.pds,
+//                        style = MaterialTheme.typography.bodySmall.copy(
+//                            color = MaterialTheme.colorScheme.onSurfaceVariant
+//                        )
+//                    )
                 }
             }
 
-            Spacer(modifier = Modifier.height(10.dp))
-//            OutlinedTextField(
-//                value = hostUrl,
-//                onValueChange = { hostUrl = it.trim() },
-//                label = { Text("Bluesky Host URL") },
-//                placeholder = { Text("e.g., https://bsky.social") },
-//                modifier = Modifier.fillMaxWidth(),
-//                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
-//                singleLine = true
-//            )
-//            Spacer(modifier = Modifier.height(16.dp))
-            OutlinedTextField(
-                value = handle,
-                onValueChange = { handle = it },
-                label = { Text("Handle") },
-                modifier = Modifier.fillMaxWidth(),
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                singleLine = true
-            )
-            Spacer(modifier = Modifier.height(24.dp))
-            Button(
-                onClick = {
-                    val trimmed = handle.trim()
-                    Log.d("LoginRoute", "Starting OAuth for handle: $trimmed")
-                    authViewModel.startOAuthFlow(trimmed)
-                },
-                modifier = Modifier.fillMaxWidth(),
-                enabled = handle.isNotBlank() && !isLoading
-            ) {
-                if (isLoading) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(18.dp),
-                        strokeWidth = 2.dp
-                    )
-                    Spacer(modifier = Modifier.width(12.dp))
-                }
-                Text("Continue")
-            }
-            OutlinedButton(
-                onClick = {
-                    navigator.navigate(PdsListDestination)
-                },
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text("Create an account")
-            }
+            //Spacer(modifier = Modifier.height(16.dp))
 
-            Spacer(modifier = Modifier.height(16.dp))
-
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(
-                    Icons.Rounded.Public,
-                    "Globe",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(MaterialTheme.typography.bodySmall.toDp() + 2.dp)
-                )
-                Text(
-                    pds?.url ?: viewModel.pds,
-                    style = MaterialTheme.typography.bodySmall.copy(
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                )
-            }
+//            Row(
+//                horizontalArrangement = Arrangement.spacedBy(6.dp),
+//                verticalAlignment = Alignment.CenterVertically
+//            ) {
+//                Icon(
+//                    Icons.Rounded.Public,
+//                    "Globe",
+//                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+//                    modifier = Modifier.size(MaterialTheme.typography.bodySmall.toDp() + 2.dp)
+//                )
+//
+//            }
             errorMessage?.let {
                 Spacer(modifier = Modifier.height(16.dp))
                 Text(it, color = MaterialTheme.colorScheme.error)

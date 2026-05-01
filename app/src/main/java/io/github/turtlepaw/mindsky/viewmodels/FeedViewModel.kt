@@ -13,6 +13,7 @@ import app.bsky.feed.GetFeedGeneratorQueryParams
 import app.bsky.feed.GetFeedGeneratorResponse
 import app.bsky.feed.GetFeedQueryParams
 import app.bsky.feed.GetFeedResponse
+import app.bsky.feed.GetListFeedQueryParams
 import app.bsky.feed.GetPostsQueryParams
 import app.bsky.feed.GetTimelineQueryParams
 import app.bsky.feed.PostView
@@ -77,17 +78,30 @@ class FeedViewModel(
 
     var userFeedCursors = mutableMapOf<AtUri, String?>()
 
-    suspend fun fetchUserFeed(uri: AtUri): GetFeedResponse {
-        val feed = api.getFeed(
-            GetFeedQueryParams(
-                feed = uri,
-                limit = 50,
-                cursor = userFeedCursors[uri]
-            )
-        ).requireResponse()
+    suspend fun fetchUserFeed(uri: AtUri): List<FeedViewPost> {
+        if(uri.atUri.contains("app.bsky.feed.generator")) {
+            val feed = api.getFeed(
+                GetFeedQueryParams(
+                    feed = uri,
+                    limit = 50,
+                    cursor = userFeedCursors[uri]
+                )
+            ).requireResponse()
 
-        userFeedCursors[uri] = feed.cursor
-        return feed
+            userFeedCursors[uri] = feed.cursor
+            return feed.feed
+        } else {
+            val feed = api.getListFeed(
+                GetListFeedQueryParams(
+                    list = uri,
+                    limit = 50,
+                    cursor = userFeedCursors[uri]
+                )
+            ).requireResponse()
+
+            userFeedCursors[uri] = feed.cursor
+            return feed.feed
+        }
     }
 
     fun fetchCustomFeed(uri: AtUri, isRefresh: Boolean = false) {
@@ -104,7 +118,7 @@ class FeedViewModel(
 
             try {
                 val feedResponse = fetchUserFeed(uri)
-                val newPosts = FeedTuner.cleanReplies(feedResponse.feed)
+                val newPosts = FeedTuner.cleanReplies(feedResponse)
 
                 // Cache all posts
                 newPosts.forEach { addCachedPost(it.post) }
@@ -132,7 +146,7 @@ class FeedViewModel(
             error.value = null
             try {
                 val feedResponse = fetchUserFeed(uri)
-                val newPosts = FeedTuner.cleanReplies(feedResponse.feed)
+                val newPosts = FeedTuner.cleanReplies(feedResponse)
 
                 // Cache all posts
                 newPosts.forEach { addCachedPost(it.post) }
@@ -263,10 +277,6 @@ class FeedViewModel(
 
     private var lastFetchTime = 0L
     private var followingFeedCursor: String? = null
-
-    init {
-        fetchFeed()
-    }
 
     suspend fun getPost(uri: String): PostView {
         val followingMatch = followingFeed.value?.find { it.post.uri.atUri == uri }

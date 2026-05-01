@@ -185,7 +185,9 @@ fun CustomPds(navigator: DestinationsNavigator) {
                             } else {
                                 "https://$pdsUrl"
                             }
-                            navigator.navigate(LoginDestination)
+                            navigator.navigate(
+                                LoginDestination(viewModel.pds)
+                            )
                         }
 
                         ConnectionState.Idle, ConnectionState.Failed -> {

@@ -109,7 +109,7 @@ fun PdsList(navigator: DestinationsNavigator) {
                     navigator.navigate(
                         if (pds.url.isNullOrBlank())
                             CustomPdsDestination
-                        else LoginDestination
+                        else LoginDestination(pds.url)
                     )
                 }
             }

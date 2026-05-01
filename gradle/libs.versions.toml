@@ -45,7 +45,6 @@ coil-compose = { module = "io.coil-kt.coil3:coil-compose", version.ref = "coilCo
 coil-network-okhttp = { module = "io.coil-kt.coil3:coil-network-okhttp", version.ref = "coilCompose" }
 compose-video = { module = "io.sanghun:compose-video", version.ref = "composeVideo" }
 gson = { module = "com.google.code.gson:gson", version.ref = "gson" }
-bluesky = { module = "sh.christian.ozone:bluesky", version.ref = "bluesky" }
 kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlinxSerializationJson" }
 kotlinx-serialization-json-v163 = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlinxSerializationJsonVersion" }
 ktor-client-logging = { module = "io.ktor:ktor-client-logging", version.ref = "ktorClientLogging" }
@@ -72,7 +71,6 @@ androidx-ui-test-junit4 = { group = "androidx.compose.ui", name = "ui-test-junit
 androidx-material3 = { group = "androidx.compose.material3", name = "material3", version.ref = "material3" }
 ksp = { module = "io.github.raamcosta.compose-destinations:ksp", version.ref = "core" }
 litert = { module = "com.google.ai.edge.litert:litert", version.ref = "litert" }
-oauth = { module = "sh.christian.ozone:oauth", version.ref = "bluesky" }
 okhttp = { module = "com.squareup.okhttp3:okhttp", version.ref = "okhttp" }
 androidx-runtime-livedata = { group = "androidx.compose.runtime", name = "runtime-livedata", version.ref = "runtimeLivedata" }
 onnxruntime-android = { module = "com.microsoft.onnxruntime:onnxruntime-android", version.ref = "onnxruntimeAndroid" }
@@ -82,6 +80,8 @@ androidx-appcompat = { group = "androidx.appcompat", name = "appcompat", version
 material = { group = "com.google.android.material", name = "material", version.ref = "material" }
 androidx-compose-runtime = { group = "androidx.compose.runtime", name = "runtime", version.ref = "runtime" }
 androidx-browser = { group = "androidx.browser", name = "browser", version.ref = "browser" }
+oauth = { module = "sh.christian.ozone:oauth", version.ref = "bluesky" }
+bluesky = { module = "sh.christian.ozone:bluesky", version.ref = "bluesky" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

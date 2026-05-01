@@ -49,7 +49,6 @@ import io.github.turtlepaw.mindsky.components.post.PostDensity
 import io.github.turtlepaw.mindsky.di.LocalFeedModel
 import io.github.turtlepaw.mindsky.di.LocalMindskyApi
 import io.github.turtlepaw.mindsky.routes.settings.TopAppBarCommon
-import kotlinx.serialization.PolymorphicSerializer
 import sh.christian.ozone.api.AtUri
 import kotlin.math.max
 import kotlin.math.min
@@ -77,7 +76,7 @@ internal fun rememberThreadReplies(postUri: String, depth: Int): SingleCacheLoad
                 .filterIsInstance<ThreadViewPostReplieUnion.ThreadViewPost>()
                 .associate { it.value.post.uri.atUri to it.value }
         },
-        serializer = PolymorphicSerializer(ThreadViewPost::class),
+        serializer = ThreadViewPost.serializer(),
         identifier = "${postUri}_replies_depth_$depth",
     )
 }

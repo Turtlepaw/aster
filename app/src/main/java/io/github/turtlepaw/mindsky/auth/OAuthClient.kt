@@ -54,7 +54,7 @@ class OAuthClient(
     /**
      * Start the OAuth flow by resolving the user's handle and building the authorization URL.
      */
-    suspend fun startOAuthFlow(handle: String): String = withContext(Dispatchers.IO) {
+    suspend fun startOAuthFlowWithHandle(handle: String): String = withContext(Dispatchers.IO) {
         Log.d(TAG, "Starting OAuth flow for handle: $handle")
 
         val did = resolveHandleToDid(handle)
@@ -66,15 +66,60 @@ class OAuthClient(
         val codeChallenge = generateCodeChallenge(codeVerifier!!)
         expectedState = generateState()
 
-        val authUrl = buildAuthorizationUrl(
-            metadata.authorizationEndpoint,
-            codeChallenge,
-            expectedState!!,
-            handle
-        )
+        val authUrl = if (metadata.pushedAuthorizationRequestEndpoint != null) {
+            val requestUri = requestPushedAuthorization(
+                metadata.pushedAuthorizationRequestEndpoint,
+                codeChallenge,
+                expectedState!!,
+                handle
+            )
+            buildAuthorizationUrlWithRequestUri(metadata.authorizationEndpoint, requestUri)
+        } else {
+            buildAuthorizationUrl(
+                metadata.authorizationEndpoint,
+                codeChallenge,
+                expectedState!!,
+                handle
+            )
+        }
 
         sessionManager.saveOAuthState(
             OAuthState(expectedState!!, codeVerifier!!, authServerUrl, handle)
+        )
+
+        authUrl
+    }
+
+    /**
+     * Start the OAuth flow by resolving the user's handle and building the authorization URL.
+     */
+    suspend fun startOAuthFlow(pdsUrl: String): String = withContext(Dispatchers.IO) {
+        Log.d(TAG, "Starting OAuth flow for pds: $pdsUrl")
+
+        val authServerUrl = discoverAuthorizationServer(pdsUrl)
+        val metadata = getAuthorizationServerMetadata(authServerUrl)
+
+        codeVerifier = generateCodeVerifier()
+        val codeChallenge = generateCodeChallenge(codeVerifier!!)
+        expectedState = generateState()
+
+        val authUrl = if (metadata.pushedAuthorizationRequestEndpoint != null) {
+            val requestUri = requestPushedAuthorization(
+                metadata.pushedAuthorizationRequestEndpoint,
+                codeChallenge,
+                expectedState!!,
+            )
+            buildAuthorizationUrlWithRequestUri(metadata.authorizationEndpoint, requestUri)
+        } else {
+            buildAuthorizationUrl(
+                metadata.authorizationEndpoint,
+                codeChallenge,
+                expectedState!!,
+            )
+        }
+
+        sessionManager.saveOAuthState(
+            OAuthState(expectedState!!, codeVerifier!!, authServerUrl)
         )
 
         authUrl
@@ -265,6 +310,63 @@ class OAuthClient(
         )
     }
 
+    private suspend fun requestPushedAuthorization(
+        parEndpoint: String,
+        codeChallenge: String,
+        state: String,
+        loginHint: String? = null
+    ): String {
+        var dpopProof = dpopManager.generateProof("POST", parEndpoint)
+        var response: HttpResponse = httpClient.post(parEndpoint) {
+            header("DPoP", dpopProof)
+            header("Content-Type", "application/x-www-form-urlencoded")
+            setBody(buildFormData {
+                append("response_type", "code")
+                append("client_id", CLIENT_ID)
+                append("redirect_uri", REDIRECT_URI)
+                append("scope", "atproto transition:generic transition:email transition:chat.bsky")
+                append("code_challenge", codeChallenge)
+                append("code_challenge_method", "S256")
+                append("state", state)
+                if(loginHint != null) {
+                    append("login_hint", loginHint)
+                }
+            })
+        }
+
+        if (response.status.value == 400 || response.status.value == 401) {
+            val dpopNonce = response.headers["DPoP-Nonce"]
+            if (dpopNonce != null) {
+                Log.d(TAG, "Server requires DPoP nonce for PAR, retrying")
+                dpopProof = dpopManager.generateProof("POST", parEndpoint, nonce = dpopNonce)
+                response = httpClient.post(parEndpoint) {
+                    header("DPoP", dpopProof)
+                    header("Content-Type", "application/x-www-form-urlencoded")
+                    setBody(buildFormData {
+                        append("response_type", "code")
+                        append("client_id", CLIENT_ID)
+                        append("redirect_uri", REDIRECT_URI)
+                        append("scope", "atproto transition:generic")
+                        append("code_challenge", codeChallenge)
+                        append("code_challenge_method", "S256")
+                        append("state", state)
+                        if(loginHint != null) {
+                            append("login_hint", loginHint)
+                        }
+                    })
+                }
+            }
+        }
+
+        if (!response.status.isSuccess()) {
+            val error = response.bodyAsText()
+            throw Exception("PAR request failed: ${response.status} - $error")
+        }
+
+        val parResponse = json.decodeFromString<PARResponse>(response.bodyAsText())
+        return parResponse.requestUri
+    }
+
     private suspend fun resolveDidToHandle(did: String): String {
         val didDocText = when {
             did.startsWith("did:plc:") -> httpClient.get("https://plc.directory/$did").bodyAsText()
@@ -286,7 +388,7 @@ class OAuthClient(
         authEndpoint: String,
         codeChallenge: String,
         state: String,
-        loginHint: String
+        loginHint: String? = null
     ): String {
         val params = buildString {
             append("response_type=code")
@@ -296,7 +398,20 @@ class OAuthClient(
             append("&code_challenge=$codeChallenge")
             append("&code_challenge_method=S256")
             append("&state=$state")
-            append("&login_hint=${URLEncoder.encode(loginHint, "UTF-8")}")
+            if(loginHint != null)
+                append("&login_hint=${URLEncoder.encode(loginHint, "UTF-8")}")
+        }
+
+        return "$authEndpoint?$params"
+    }
+
+    private fun buildAuthorizationUrlWithRequestUri(
+        authEndpoint: String,
+        requestUri: String
+    ): String {
+        val params = buildString {
+            append("client_id=${URLEncoder.encode(CLIENT_ID, "UTF-8")}")
+            append("&request_uri=${URLEncoder.encode(requestUri, "UTF-8")}")
         }
 
         return "$authEndpoint?$params"

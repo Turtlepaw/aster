@@ -5,7 +5,7 @@ plugins {
     id("io.objectbox")
     kotlin("plugin.serialization") version "2.1.20"
     alias(libs.plugins.compose.compiler)
-    //id("sh.christian.ozone.generator") version "0.3.3"
+    //id("com.tunjid.ozone.generator") version "0.3.8"
 }
 
 android {
@@ -23,6 +23,10 @@ android {
     }
 
     buildTypes {
+        debug {
+            applicationIdSuffix = ".debug"
+            resValue("string", "app_name", "Mindsky (Debug)")
+        }
         release {
             isMinifyEnabled = false
             proguardFiles(
@@ -109,22 +113,8 @@ dependencies {
     // Store library for caching and state management
     implementation(project(":fetch_and_cache"))
 
-    //lexicons(fileTree("lexicons") { include("**/*.json") })
+    //lexicons(fileTree("lexicons") { include("vender/atproto/lexicons/*.json") })
+        //lexicons("sh.christian.ozone:lexicons:2026.04.22")
     //api(libs.oauth)
     api(libs.bluesky)
 }
-
-//lexicons {
-//    namespace.set("sh.tangled")
-//
-//    defaults {
-//        generateUnknownsForSealedTypes.set(true)
-//        generateUnknownsForEnums.set(true)
-//    }
-//
-//    generateApi("TangledApi") {
-//        packageName.set("sh.tangled")
-//        withKtorImplementation("XrpcTangledApi")
-//        returnType.set(ApiReturnType.Response)
-//    }
-//}

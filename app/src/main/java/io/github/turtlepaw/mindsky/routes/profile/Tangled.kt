@@ -257,7 +257,7 @@ internal fun rememberTangledRepos(identifier: String): SingleCacheLoadResult<Tan
             level = LogLevel.BODY
         }
     }
-    val pdsCache = Cache<String>(
+    val pdsCache = Cache<String, String>(
         identifier = "pds_cache",
         serializer = String.serializer(),
         context = context,

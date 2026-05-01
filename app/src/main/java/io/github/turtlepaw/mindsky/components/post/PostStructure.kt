@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -35,6 +36,8 @@ fun PostStructure(
     avatar: @Composable (modifier: Modifier) -> Unit,
     metadata: @Composable () -> Unit,
     actions: @Composable (modifier: Modifier) -> Unit,
+    impressions: @Composable (modifier: Modifier) -> Unit,
+    showImpressions: Boolean = true,
     discoveryContext: @Composable (modifier: Modifier) -> Unit = {},
     density: PostDensity = PostDensity.Regular,
     onClick: (() -> Unit)? = null,
@@ -107,10 +110,13 @@ fun PostStructure(
             if (density == PostDensity.Expanded) {
                 Box(
                     modifier = Modifier
-                        .padding(horizontal = 26.dp, vertical = 10.dp)
+                        .padding(horizontal = 16.dp, vertical = 10.dp)
                 ) {
                     Text(
-                        createdAt.toJavaInstant().toFormattedString()
+                        createdAt.toJavaInstant().toFormattedString(),
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     )
                 }
             }
@@ -122,10 +128,28 @@ fun PostStructure(
                     ),
                 thickness = 0.15.dp
             )
+            if (density == PostDensity.Expanded && showImpressions) {
+                Box(
+                    modifier = Modifier
+                        .padding(horizontal = 16.dp, vertical = 10.dp)
+                ) {
+                    impressions(
+                        Modifier.fillMaxWidth()
+                    )
+                }
+                HorizontalDivider(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .then(
+                            Modifier.padding(horizontal = 12.dp)
+                        ),
+                    thickness = 0.15.dp
+                )
+            }
             if (density == PostDensity.Expanded) {
                 Box(
                     modifier = Modifier
-                        .padding(horizontal = 26.dp, vertical = 10.dp)
+                        .padding(horizontal = 16.dp, vertical = 10.dp)
                 ) {
                     PostAction.Section(actions, discoveryContext)
                 }

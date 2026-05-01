@@ -86,14 +86,17 @@ import com.ramcosta.composedestinations.utils.route
 import io.github.turtlepaw.mindsky.auth.SessionManager
 import io.github.turtlepaw.mindsky.auth.UserSession
 import io.github.turtlepaw.mindsky.cache.ProfileCache
+import io.github.turtlepaw.mindsky.components.BottomBar
 import io.github.turtlepaw.mindsky.di.LocalFeedModel
 import io.github.turtlepaw.mindsky.di.LocalLabelManager
 import io.github.turtlepaw.mindsky.di.LocalMindskyApi
 import io.github.turtlepaw.mindsky.di.LocalNavController
+import io.github.turtlepaw.mindsky.di.LocalPostState
 import io.github.turtlepaw.mindsky.di.LocalProfileModel
 import io.github.turtlepaw.mindsky.di.LocalProfileRepository
 import io.github.turtlepaw.mindsky.di.LocalScrollToTop
 import io.github.turtlepaw.mindsky.di.LocalSessionManager
+import io.github.turtlepaw.mindsky.di.PostsState
 import io.github.turtlepaw.mindsky.preferences.LocalPreferences
 import io.github.turtlepaw.mindsky.preferences.PreferenceProvider
 import io.github.turtlepaw.mindsky.repositories.ProfileRepository
@@ -161,17 +164,6 @@ object DefaultSlideFadeTransitions : NavHostAnimatedDestinationStyle() {
         }
 }
 
-private data class NavRouteMetadata(
-    val label: String,
-    val icon: ImageVector
-)
-
-private data class NavItem(
-    val direction: Direction,
-    val selectionRoutes: Set<String>,
-    val metadata: NavRouteMetadata
-)
-
 class MainActivity : ComponentActivity() {
     private lateinit var authViewModel: AuthViewModel
 
@@ -224,6 +216,7 @@ class MainActivity : ComponentActivity() {
             val feedViewModel: FeedViewModel =
                 viewModel(factory = FeedViewModelFactory(blueskyApi, this))
             val navController = rememberNavController()
+            val postState = remember { PostsState() }
 
             PreferenceProvider {
                 CompositionLocalProvider(
@@ -235,6 +228,7 @@ class MainActivity : ComponentActivity() {
                     LocalLabelManager provides mindskyApplication.labelManager,
                     LocalNavController provides navController,
                     LocalScrollToTop provides scrollToTopHandler,
+                    LocalPostState provides postState
                 ) {
                     MindskyTheme {
                         ProvidePreferenceLocals(
@@ -253,114 +247,10 @@ class MainActivity : ComponentActivity() {
                                     navController = navController
                                 )
 
-                                val session by sessionManager.sessionFlow.collectAsState()
-                                LaunchedEffect(session) {
-                                    if (session == null) {
-                                        navController.navigate(InitialOnboardingDestination.route) {
-                                            popUpTo(navController.graph.id) {
-                                                inclusive = true
-                                            }
-                                        }
-                                    }
-                                }
-                                val haptics = LocalHapticFeedback.current
-
-                                val backStackEntry by navController.currentBackStackEntryAsState()
-
-                                val currentRoute = backStackEntry?.destination?.route
-
-                                val identity = backStackEntry
-                                    ?.arguments
-                                    ?.getString("identity")
-
-                                val isOnProfileRoute = currentRoute == ProfileDestination.route
-                                val isMyProfile = identity == session?.did
-
-                                BoxWithConstraints(
-                                    modifier = Modifier.fillMaxSize(),
-                                    contentAlignment = Alignment.BottomCenter
-                                ) {
-                                    val targetWidth = if (isOnProfileRoute && !isMyProfile) {
-                                        maxWidth * 0.3f
-                                    } else {
-                                        maxWidth * 0.6f
-                                    }
-
-                                    val animatedWidth by animateDpAsState(
-                                        targetValue = targetWidth,
-                                        animationSpec = tween(50),
-                                        label = "nav_width"
-                                    )
-                                    AnimatedVisibility(
-                                        modifier = Modifier
-                                            .width(animatedWidth)
-                                            .align(Alignment.BottomCenter)
-                                            .safeDrawingPadding()
-                                            .padding(12.dp)
-                                            .height(70.dp)
-                                            .clip(
-                                                RoundedCornerShape(100.dp)
-                                            )
-                                            .background(
-                                                MaterialTheme.colorScheme.surfaceContainerLow,
-                                            )
-                                            .border(
-                                                width = 1.dp,
-                                                color = MaterialTheme.colorScheme.surfaceContainerHighest,
-                                                shape = RoundedCornerShape(100.dp)
-                                            ),
-                                        visible = navController.currentBackStackEntryAsState().value?.destination?.route in setOf(
-                                            FeedDestination.route,
-                                            ProfileDestination.route,
-                                            MyProfileDestination.route
-                                        ),
-                                        enter = fadeIn(
-                                            animationSpec = tween(durationMillis = 200)
-                                        ),
-                                        exit = fadeOut(
-                                            animationSpec = tween(durationMillis = 150)
-                                        ),
-                                    ) {
-                                        AnimatedContent(
-                                            targetState = isOnProfileRoute && !isMyProfile,
-                                            transitionSpec = {
-                                                fadeIn(tween(200)) togetherWith fadeOut(tween(200))
-                                            },
-                                            label = "nav_content"
-                                        ) { isCompact ->
-                                            if (isCompact) {
-                                                Box(
-                                                    modifier = Modifier
-                                                        .fillMaxSize()
-                                                        .clickable {
-                                                            haptics.performHapticFeedback(
-                                                                HapticFeedbackType.Confirm
-                                                            )
-                                                            scrollToTopHandler.value?.invoke()
-                                                        }
-                                                        .padding(
-                                                            horizontal = 8.dp,
-                                                            vertical = 8.dp
-                                                        ),
-                                                    contentAlignment = Alignment.Center
-                                                ) {
-                                                    Icon(
-                                                        imageVector = Icons.Rounded.ArrowUpward,
-                                                        contentDescription = "Scroll to top",
-                                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                    )
-                                                }
-                                            } else {
-                                                NavItems(
-                                                    session = session,
-                                                    currentRoute = currentRoute,
-                                                    navController = navController,
-                                                    scrollToTopHandler = scrollToTopHandler
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
+                                BottomBar(
+                                    navController = navController,
+                                    modifier = Modifier.align(Alignment.BottomCenter)
+                                )
                             }
                         }
                     }
@@ -386,99 +276,6 @@ class MainActivity : ComponentActivity() {
         } else if (code != null) {
             Log.d("MainActivity", "Handling OAuth callback with code: $code")
             authViewModel.handleOAuthCallback(code, state)
-        }
-    }
-}
-
-@Composable
-fun NavItems(
-    session: UserSession?,
-    currentRoute: String?,
-    navController: androidx.navigation.NavController,
-    scrollToTopHandler: MutableState<(() -> Unit)?>
-) {
-    val haptics = LocalHapticFeedback.current
-    val items = listOf(
-        NavItem(
-            direction = FeedDestination(),
-            selectionRoutes = setOf(FeedDestination.route),
-            metadata = NavRouteMetadata(
-                label = "Feed",
-                icon = Icons.Filled.Home
-            )
-        ),
-        NavItem(
-            direction = ProfileDestination(session?.did ?: ""),
-            selectionRoutes = setOf(
-                ProfileDestination.route,
-                MyProfileDestination.route
-            ),
-            metadata = NavRouteMetadata(
-                label = "Profile",
-                icon = Icons.Filled.Person
-            )
-        )
-    )
-    Row(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(horizontal = 8.dp, vertical = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        items.forEach { item ->
-            val isSelected = currentRoute in item.selectionRoutes
-            val backgroundColor = if (isSelected) {
-                MaterialTheme.colorScheme.primaryContainer
-            } else {
-                MaterialTheme.colorScheme.surfaceContainerLow
-            }
-            val contentColor = if (isSelected) {
-                MaterialTheme.colorScheme.onPrimaryContainer
-            } else {
-                MaterialTheme.colorScheme.onSurfaceVariant
-            }
-
-            Row(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxHeight()
-                    .clip(RoundedCornerShape(100.dp))
-                    .background(
-                        backgroundColor,
-                        shape = RoundedCornerShape(100.dp)
-                    )
-                    .clickable {
-                        haptics.performHapticFeedback(
-                            HapticFeedbackType.Confirm
-                        )
-                        if (isSelected) {
-                            scrollToTopHandler.value?.invoke()
-                        } else {
-                            navController.navigate(
-                                item.direction.route,
-                                navOptions = androidx.navigation.navOptions {
-                                    launchSingleTop = true
-                                    popUpTo(navController.graph.id) {
-                                        inclusive = true
-                                    }
-                                }
-                            )
-                        }
-                    }
-                    .padding(
-                        horizontal = 12.dp,
-                        vertical = 8.dp
-                    ),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.Center
-            ) {
-                Icon(
-                    imageVector = item.metadata.icon,
-                    contentDescription = item.metadata.label,
-                    tint = contentColor
-                )
-            }
         }
     }
 }

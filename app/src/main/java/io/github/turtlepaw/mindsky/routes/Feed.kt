@@ -55,6 +55,7 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.livedata.observeAsState
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -86,6 +87,7 @@ import app.bsky.graph.GetListsQueryParams
 import app.bsky.graph.ListView
 import com.ramcosta.composedestinations.annotation.Destination
 import com.ramcosta.composedestinations.annotation.RootGraph
+import com.ramcosta.composedestinations.generated.destinations.ComposerDestination
 import com.ramcosta.composedestinations.generated.destinations.DownloadModelDestination
 import com.ramcosta.composedestinations.generated.destinations.FullsizePostDestination
 import com.ramcosta.composedestinations.generated.destinations.MyProfileDestination
@@ -244,7 +246,7 @@ fun Feed(nav: DestinationsNavigator) {
         }
     }
 
-    var lastFetchTime by remember { mutableStateOf(0L) }
+    var lastFetchTime by remember { mutableLongStateOf(0L) }
 
     val followingFeedData = viewModel.followingFeed.value
     val forYouFeedData = viewModel.forYouFeed.value
@@ -254,8 +256,15 @@ fun Feed(nav: DestinationsNavigator) {
         viewModel.isFetchingFeed.value || viewModel.isFetchingCustomFeed.value // Use ViewModel's state
     val error = viewModel.error.value
 
-    val startDestination by rememberPreference(AppPrefs.DefaultFeed)
-    var selectedDestination by rememberSaveable { mutableIntStateOf(startDestination) }
+    var selectedDestination by rememberSaveable { mutableIntStateOf(0) }
+    val prefs = LocalPreferences.current
+
+    LaunchedEffect(Unit) {
+        selectedDestination = prefs.get(AppPrefs.DefaultFeed)
+        if(selectedDestination == 0){
+            viewModel.fetchFeed()
+        }
+    }
 
     val workManager = WorkManager.getInstance(context)
     val workInfos by workManager.getWorkInfosLiveData(
@@ -352,13 +361,7 @@ fun Feed(nav: DestinationsNavigator) {
         }
     }
 
-    Scaffold(
-        floatingActionButton = {
-            FloatingActionButton(onClick = { /* do something */ }) {
-                Icon(Icons.Filled.PostAdd, stringResource(R.string.post))
-            }
-        }
-    ) { paddingValues ->
+    Scaffold { paddingValues ->
         Box(
             modifier = Modifier
                 .padding(paddingValues)
@@ -431,54 +434,60 @@ fun Feed(nav: DestinationsNavigator) {
                     }
                     item {
                         PrimaryScrollableTabRow(
-                            selectedTabIndex = selectedDestination,
+                            selectedTabIndex = selectedDestination.coerceIn(0, (feeds.size - 1).coerceAtLeast(0)),
                             edgePadding = 0.dp,
                             modifier = Modifier.fillMaxWidth(),
                         ) {
-                            if (userFeeds.error == null) {
-                                feeds.forEachIndexed { index, destination ->
-                                    Tab(
-                                        selected = selectedDestination == index,
-                                        onClick = {
-                                            if (selectedDestination != index) {
-                                                selectedDestination = index
+                            feeds.forEachIndexed { index, destination ->
+                                Tab(
+                                    selected = selectedDestination == index,
+                                    onClick = {
+                                        if (selectedDestination != index) {
+                                            selectedDestination = index
+                                            prefs.set(AppPrefs.DefaultFeed, index)
 
-                                                if (index < feeds.size) {
-                                                    when (val dest = feeds[index]) {
-                                                        is FeedDestination.Following, FeedDestination.ForYou -> viewModel.fetchFeed()
-                                                        is FeedDestination.UserFeed -> viewModel.fetchCustomFeed(
-                                                            AtUri(dest.id),
-                                                            isRefresh = true
-                                                        )
-                                                    }
-                                                }
-                                            }
-                                        },
-                                        text = {
-                                            Row(
-                                                verticalAlignment = Alignment.CenterVertically,
-                                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                            ) {
-                                                if (destination is FeedDestination.ForYou) {
-                                                    Icon(
-                                                        Icons.Rounded.AutoAwesome,
-                                                        contentDescription = "Sparkles",
-                                                        tint = MaterialTheme.colorScheme.onSurface
+                                            if (index < feeds.size) {
+                                                when (val dest = feeds[index]) {
+                                                    is FeedDestination.Following, FeedDestination.ForYou -> viewModel.fetchFeed()
+                                                    is FeedDestination.UserFeed -> viewModel.fetchCustomFeed(
+                                                        AtUri(dest.id),
+                                                        isRefresh = true
                                                     )
                                                 }
-                                                Text(
-                                                    destination.title,
-                                                    style = MaterialTheme.typography.bodySmall.copy(
-                                                        color = MaterialTheme.colorScheme.onSurface,
-                                                    )
-                                                )
                                             }
                                         }
-                                    )
-                                }
-                            } else {
-                                Text(userFeeds.error!!.message ?: "Unknown error")
+                                    },
+                                    text = {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            if (destination is FeedDestination.ForYou) {
+                                                Icon(
+                                                    Icons.Rounded.AutoAwesome,
+                                                    contentDescription = "Sparkles",
+                                                    tint = MaterialTheme.colorScheme.onSurface
+                                                )
+                                            }
+                                            Text(
+                                                destination.title,
+                                                style = MaterialTheme.typography.bodySmall.copy(
+                                                    color = MaterialTheme.colorScheme.onSurface,
+                                                )
+                                            )
+                                        }
+                                    }
+                                )
                             }
+                        }
+                    }
+                    if (userFeeds.error != null) {
+                        item {
+                            Text(
+                                userFeeds.error!!.message ?: "Unknown error",
+                                color = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.padding(16.dp)
+                            )
                         }
                     }
                     if (selectedDestination == 0) {
@@ -489,14 +498,9 @@ fun Feed(nav: DestinationsNavigator) {
                                 }
                             }
                             item {
-                                LaunchedEffect(Unit) {
+                                LoadMore(Unit) {
                                     viewModel.loadMoreFollowingFeed()
                                 }
-
-                                LoadingIndicator(
-                                    modifier = Modifier
-                                        .padding(16.dp),
-                                )
                             }
                         } else {
                             Loading()
@@ -513,14 +517,9 @@ fun Feed(nav: DestinationsNavigator) {
                                 }
                             }
                             item {
-                                LaunchedEffect(Unit) {
+                                LoadMore(Unit) {
                                     viewModel.loadMoreForYouFeeds()
                                 }
-
-                                LoadingIndicator(
-                                    modifier = Modifier
-                                        .padding(16.dp),
-                                )
                             }
                         } else if (forYouFeedData != null && forYouFeedData.isEmpty()) {
                             item {
@@ -554,20 +553,16 @@ fun Feed(nav: DestinationsNavigator) {
                             val currentFeed =
                                 feeds[selectedDestination] as? FeedDestination.UserFeed
                             if (currentFeed != null) {
-                                if (customFeedData != null) {
+                                if (!customFeedData.isNullOrEmpty()) {
                                     items(customFeedData) {
                                         PostComponent(it, nav) {
                                             nav.navigate(FullsizePostDestination(it.post.uri.atUri))
                                         }
                                     }
                                     item {
-                                        LaunchedEffect(currentFeed.id) {
+                                        LoadMore(currentFeed.id) {
                                             viewModel.loadMoreCustomFeed(AtUri(currentFeed.id))
                                         }
-
-                                        LoadingIndicator(
-                                            modifier = Modifier.padding(16.dp),
-                                        )
                                     }
                                 } else {
                                     // Trigger fetch if null (e.g. initial load if logic above failed or just safe guard)
@@ -578,10 +573,8 @@ fun Feed(nav: DestinationsNavigator) {
                                                 isRefresh = true
                                             )
                                         }
-                                        LoadingIndicator(
-                                            modifier = Modifier.padding(16.dp),
-                                        )
                                     }
+                                    Loading()
                                 }
                             }
                         }
@@ -631,6 +624,19 @@ fun Feed(nav: DestinationsNavigator) {
             TopBarButtons(listState, nav)
         }
     }
+}
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+fun LoadMore(trigger: Any, onLoad: () -> Unit) {
+    LaunchedEffect(trigger) {
+        onLoad()
+    }
+
+LoadingIndicator(
+modifier = Modifier.padding(16.dp),
+)
+
 }
 
 @Composable

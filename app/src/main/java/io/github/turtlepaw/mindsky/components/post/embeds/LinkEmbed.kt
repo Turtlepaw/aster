@@ -43,11 +43,14 @@ import kotlinx.coroutines.launch
 fun LinkEmbed(record: ExternalView) {
     val uriHandler = LocalUriHandler.current
     val haptics = LocalHapticFeedback.current
-    EmbedStructure(onClick = {
-        haptics.performHapticFeedback(HapticFeedbackType.ContextClick)
-        uriHandler.openUri(record.external.uri.toString())
-    }) {
-        if(record.external.thumb?.uri != null) AsyncImage(
+    EmbedStructure(
+        modifier = Modifier.fillMaxWidth(),
+        onClick = {
+            haptics.performHapticFeedback(HapticFeedbackType.ContextClick)
+            uriHandler.openUri(record.external.uri.toString())
+        }
+    ) {
+        if (record.external.thumb?.uri != null) AsyncImage(
             model = record.external.thumb?.uri,
             contentDescription = "External embed image",
             modifier = Modifier
@@ -58,12 +61,16 @@ fun LinkEmbed(record: ExternalView) {
                 .padding(15.dp)
         ) {
             val domain = record.external.uri.uri.toUri().authority
-            if(domain != null) Text(domain, style = MaterialTheme.typography.labelMedium.copy(
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            ))
-            Text(record.external.title, style = MaterialTheme.typography.titleMedium.copy(
-                fontWeight = FontWeight.SemiBold
-            ))
+            if (domain != null) Text(
+                domain, style = MaterialTheme.typography.labelMedium.copy(
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            )
+            Text(
+                record.external.title, style = MaterialTheme.typography.titleMedium.copy(
+                    fontWeight = FontWeight.SemiBold
+                )
+            )
             Text(record.external.description, style = MaterialTheme.typography.bodyMedium)
         }
     }

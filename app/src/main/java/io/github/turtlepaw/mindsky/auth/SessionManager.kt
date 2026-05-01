@@ -144,5 +144,5 @@ data class OAuthState(
     val state: String,
     val codeVerifier: String,
     val authServerUrl: String,
-    val handle: String
+    val handle: String? = null
 )

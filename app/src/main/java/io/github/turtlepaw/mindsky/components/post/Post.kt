@@ -39,6 +39,7 @@ import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.Repeat
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -71,10 +72,13 @@ import androidx.core.content.ContextCompat
 import app.bsky.embed.RecordViewRecordUnion
 import app.bsky.feed.FeedViewPost
 import app.bsky.feed.FeedViewPostReasonUnion
+import app.bsky.feed.GetLikesQueryParams
+import app.bsky.feed.GetRepostedByQueryParams
 import app.bsky.feed.Like
 import app.bsky.feed.Post
 import app.bsky.feed.PostView
 import app.bsky.feed.PostViewEmbedUnion
+import app.bsky.feed.Repost
 import app.bsky.richtext.FacetFeatureUnion
 import coil3.compose.AsyncImage
 import com.atproto.label.Label
@@ -83,6 +87,7 @@ import com.atproto.repo.DeleteRecordRequest
 import com.atproto.repo.StrongRef
 import com.ramcosta.composedestinations.generated.destinations.ImageDestination
 import com.ramcosta.composedestinations.generated.destinations.ProfileDestination
+import com.ramcosta.composedestinations.generated.destinations.UserListDestination
 import com.ramcosta.composedestinations.navigation.DestinationsNavigator
 import io.github.turtlepaw.mindsky.R
 import io.github.turtlepaw.mindsky.auth.SessionManager
@@ -93,7 +98,11 @@ import io.github.turtlepaw.mindsky.components.post.embeds.LinkEmbed
 import io.github.turtlepaw.mindsky.components.post.embeds.QuotePost
 import io.github.turtlepaw.mindsky.components.post.embeds.StarterPack
 import io.github.turtlepaw.mindsky.components.post.embeds.VideoEmbed
+import io.github.turtlepaw.mindsky.di.LocalIdentityProvider
 import io.github.turtlepaw.mindsky.di.LocalMindskyApi
+import io.github.turtlepaw.mindsky.di.LocalPostState
+import io.github.turtlepaw.mindsky.routes.UserListType
+import io.github.turtlepaw.mindsky.utils.sanitize
 import kotlinx.coroutines.launch
 import kotlinx.datetime.Clock
 import kotlinx.serialization.EncodeDefault
@@ -108,6 +117,7 @@ import sh.christian.ozone.api.model.JsonContent.Companion.encodeAsJsonContent
 import sh.christian.ozone.api.model.Timestamp
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
+import kotlin.math.max
 
 @Composable
 fun PostComponent(
@@ -123,9 +133,10 @@ fun PostComponent(
         postView.reason,
         onClick = onClick,
         enabled = enabled,
-        density = density
+        density = density,
     )
 }
+
 
 @Serializable
 public data class AppBskyFeedLike(
@@ -133,12 +144,40 @@ public data class AppBskyFeedLike(
     @EncodeDefault
     public val `$type`: String = "app.bsky.feed.like",
     public val subject: StrongRef,
+    public val via: StrongRef? = null,
     public val createdAt: Timestamp,
 ) {
     companion object {
-        public fun fromSubject(subject: StrongRef): AppBskyFeedLike {
+        public fun fromSubject(
+            subject: StrongRef,
+            via: StrongRef? = null
+        ): AppBskyFeedLike {
             return AppBskyFeedLike(
                 subject = subject,
+                via = via,
+                createdAt = Clock.System.now()
+            )
+        }
+    }
+}
+
+@Serializable
+public data class AppBskyFeedRepost(
+    @OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)
+    @EncodeDefault
+    public val `$type`: String = "app.bsky.feed.repost",
+    public val subject: StrongRef,
+    public val via: StrongRef? = null,
+    public val createdAt: Timestamp,
+) {
+    companion object {
+        public fun create(
+            subject: StrongRef,
+            via: StrongRef? = null
+        ): AppBskyFeedRepost {
+            return AppBskyFeedRepost(
+                subject = subject,
+                via = via,
                 createdAt = Clock.System.now()
             )
         }
@@ -150,7 +189,9 @@ public data class AppBskyFeedLike(
 fun RepostSheet(
     isOpen: Boolean,
     onDismiss: () -> Unit,
-    onClick: () -> Unit
+    onQuoteClick: () -> Unit,
+    onRepostClick: () -> Unit,
+    isReposted: Boolean
 ) {
     val sheetState = rememberModalBottomSheetState()
     val scope = rememberCoroutineScope()
@@ -175,7 +216,7 @@ fun RepostSheet(
                         .clickable {
                             scope.launch { sheetState.hide() }.invokeOnCompletion {
                                 onDismiss()
-                                onClick()
+                                onRepostClick()
                             }
                         }
                         .padding(10.dp),
@@ -186,7 +227,7 @@ fun RepostSheet(
                         contentDescription = "Repeat",
                         tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
                     )
-                    Text("Repost")
+                    Text(if (isReposted) "Remove repost" else "Repost")
                 }
                 Row(
                     modifier = Modifier
@@ -195,7 +236,7 @@ fun RepostSheet(
                         .clickable {
                             scope.launch { sheetState.hide() }.invokeOnCompletion {
                                 onDismiss()
-                                onClick()
+                                onQuoteClick()
                             }
                         }
                         .padding(10.dp),
@@ -237,11 +278,11 @@ fun PostComponent(
     }
 
     if (postRecord == null) {
-        return Row(
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Text("Failed to decode post")
-        }
+        Log.w(
+            "PostDebug",
+            "Skipping post render; record could not be decoded: ${postView.uri.atUri}"
+        )
+        return
     }
     val session = SessionManager(LocalContext.current).getSession()
     val api = LocalMindskyApi.current
@@ -249,14 +290,79 @@ fun PostComponent(
     val coroutineScope = rememberCoroutineScope()
     val haptics = LocalHapticFeedback.current
     var isRepostSheetOpen by remember { mutableStateOf(false) }
+    val via = null
+    val postState = LocalPostState.current
+
+    val viewerLike = postView.viewer?.like
+    val viewerRepost = postView.viewer?.repost
+
+    val currentState = postState.syncFromViewer(
+        uri = postView.uri,
+        likeUri = viewerLike,
+        repostUri = viewerRepost
+    )
+
+    val likeUri = currentState.likeUri
+    val repostUri = currentState.repostUri
+    val baseLikeCount = postView.likeCount ?: 0
+    val likeDelta = when {
+        viewerLike != null && likeUri == null -> -1
+        viewerLike == null && likeUri != null -> 1
+        else -> 0
+    }
+    val displayLikeCount = max(0, baseLikeCount + likeDelta)
+    val baseRepostCount = postView.repostCount ?: 0
+    val repostDelta = when {
+        viewerRepost != null && repostUri == null -> -1
+        viewerRepost == null && repostUri != null -> 1
+        else -> 0
+    }
+    val displayRepostCount = max(0, baseRepostCount + repostDelta)
+    val hasImpressions = displayLikeCount > 0 || displayRepostCount > 0
+//        if(reason is FeedViewPostReasonUnion.ReasonRepost){
+//        StrongRef(reason.value)
+//    }
 
     RepostSheet(
         isOpen = isRepostSheetOpen,
         onDismiss = { isRepostSheetOpen = false },
-        onClick = {
-            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-
-        }
+        onQuoteClick = {},
+        onRepostClick = {
+            coroutineScope.launch {
+                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                val collection = Nsid("app.bsky.feed.repost")
+                val currentRepostUri = postState.getRepost(postView.uri)
+                try {
+                    if (currentRepostUri != null) {
+                        postState.setReposted(postView.uri, null)
+                        api.deleteRecord(
+                            DeleteRecordRequest(
+                                collection = collection,
+                                repo = Did(session!!.did),
+                                rkey = currentRepostUri.getRkey(),
+                            )
+                        ).requireResponse()
+                    } else {
+                        val repost = api.createRecord(
+                            CreateRecordRequest(
+                                record = Json.encodeAsJsonContent(
+                                    AppBskyFeedRepost.create(
+                                        subject = StrongRef(postView.uri, postView.cid),
+                                        via = via
+                                    )
+                                ),
+                                repo = Did(session!!.did),
+                                collection = collection,
+                            )
+                        ).requireResponse()
+                        postState.setReposted(postView.uri, repost.uri)
+                    }
+                } catch (error: Error) {
+                    error.printStackTrace()
+                }
+            }
+        },
+        isReposted = currentState.repostUri != null
     )
 
     PostStructure(
@@ -312,34 +418,58 @@ fun PostComponent(
         headline = {
             PostHeadline(postRecord.createdAt, author, density, showLabels)
         },
+        impressions = {
+            FlowRow(it, horizontalArrangement = spacedBy(24.dp)) {
+                if (displayLikeCount > 0) {
+                    PostAction.Label(
+                        label = "likes",
+                        value = displayLikeCount
+                    ) {
+                        navigator.navigate(
+                            UserListDestination(
+                                identifier = postView.uri.atUri.sanitize() + "_userlist_likes",
+                                type = UserListType.Likes(postView.uri.atUri)
+                            )
+                        )
+                    }
+                }
+                if (displayRepostCount > 0) {
+                    PostAction.Label(
+                        label = "reposts",
+                        value = displayRepostCount
+                    ) {
+                        navigator.navigate(
+                            UserListDestination(
+                                identifier = postView.uri.atUri.sanitize() + "_userlist_reposts",
+                                type = UserListType.Reposts(postView.uri.atUri)
+                            )
+                        )
+                    }
+                }
+            }
+        },
+        showImpressions = hasImpressions,
         actions = {
             if (showActions) {
                 FlowRow(it, horizontalArrangement = spacedBy(24.dp)) {
-                    var isLiked by remember {
-                        mutableStateOf(postView.viewer?.like != null)
-                    }
-                    var likeUri by remember {
-                        mutableStateOf(postView.viewer?.like)
-                    }
-                    val isReposted = postView.viewer?.repost != null
                     PostAction.Button(
                         label = postView.replyCount,
                         icon = Icons.Rounded.ChatBubbleOutline,
                         contentDescription = "Chat Bubble",
                     ) { }
                     PostAction.Button(
-                        label = postView.repostCount,
+                        label = displayRepostCount,
                         icon = Icons.Rounded.Repeat,
                         contentDescription = "Repeat",
-                        isHighlighted = isReposted,
+                        isHighlighted = repostUri != null,
                     ) {
                         isRepostSheetOpen = true
                     }
                     PostAction.Button(
-                        label = (postView.likeCount ?: 0) + if (isLiked) 1 else 0,
-                        icon = if (isLiked) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
+                        label = displayLikeCount,
+                        icon = if (likeUri != null) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
                         contentDescription = "Heart",
-                        isHighlighted = isLiked,
+                        isHighlighted = likeUri != null,
                     ) {
                         coroutineScope.launch {
                             val session = SessionManager(context).getSession()
@@ -349,37 +479,37 @@ fun PostComponent(
                             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                                 vibrator.vibrate(
                                     VibrationEffect.createPredefined(
-                                        if (isLiked) VibrationEffect.EFFECT_TICK
+                                        if (likeUri != null) VibrationEffect.EFFECT_TICK
                                         else VibrationEffect.EFFECT_DOUBLE_CLICK
                                     )
                                 )
                             } else {
                                 vibrator.vibrate(50)
                             }
-                            if (isLiked) {
-                                isLiked = false
+                            val currentLikeUri = postState.getLike(postView.uri)
+                            if (currentLikeUri != null) {
+                                postState.setLike(postView.uri, null)
                                 api.deleteRecord(
                                     DeleteRecordRequest(
                                         collection = collection,
                                         repo = Did(session!!.did),
-                                        rkey = likeUri!!.getRkey(),
+                                        rkey = currentLikeUri.getRkey(),
                                     ),
                                 ).requireResponse()
-                                likeUri = null
                             } else {
-                                isLiked = true
                                 val data = api.createRecord(
                                     CreateRecordRequest(
                                         record = Json.encodeAsJsonContent(
                                             AppBskyFeedLike.fromSubject(
-                                                StrongRef(postView.uri, postView.cid)
-                                            )
+                                                StrongRef(postView.uri, postView.cid),
+                                                via = via
+                                            ),
                                         ),
                                         repo = Did(session!!.did),
                                         collection = collection,
                                     )
                                 ).requireResponse()
-                                likeUri = data.uri
+                                postState.setLike(postView.uri, data.uri)
                             }
                         }
                     }
@@ -682,6 +812,7 @@ fun LoadingPost() {
         },
         metadata = {},
         actions = {},
+        impressions = {},
         createdAt = Clock.System.now()
     ) {
         repeat(3) {

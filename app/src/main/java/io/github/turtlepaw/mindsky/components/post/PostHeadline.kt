@@ -144,16 +144,6 @@ fun Labelers(labels: List<Label>, large: Boolean = false){
                     },
                     isLarge = large
                 )
-            } else {
-                // Fallback for unresolved labels
-                LabelComponent(
-                    label = label.`val`,
-                    null,
-                    onClick = {
-                        focusedLabel = label
-                    },
-                    isLarge = large
-                )
             }
         }
     }

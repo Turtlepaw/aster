@@ -3,8 +3,10 @@ package io.github.turtlepaw.mindsky.routes.profile
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
@@ -32,6 +34,7 @@ import io.github.turtlepaw.mindsky.routes.post.ImageBackButton
 fun ProfileStructure(
     banner: @Composable (modifier: Modifier) -> Unit,
     avatar: @Composable (modifier: Modifier) -> Unit,
+    actions: @Composable (modifier: Modifier) -> Unit,
     navigator: DestinationsNavigator,
     showBackButton: Boolean = true,
     avatarOnClick: (() -> Unit)?
@@ -58,8 +61,8 @@ fun ProfileStructure(
             val ringSize = 5.dp
             val avatarModifier = Modifier
                 .size(avatarSize)
+                //.offset(x = 20.dp)
                 .align(Alignment.BottomStart)
-                .offset(x = 18.dp, y = 40.dp)
                 .zIndex(10f)
                 .clip(CircleShape)
                 .background(MaterialTheme.colorScheme.surface)
@@ -71,11 +74,23 @@ fun ProfileStructure(
                     else Modifier
                 )
 
-            Box(modifier = avatarModifier) {
-                avatar(
+            Row(
+                modifier = Modifier.fillMaxWidth()
+                    .offset(y = 140.dp)
+                    .padding(start = 20.dp, end = 10.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Bottom
+            ) {
+                Box(modifier = avatarModifier) {
+                    avatar(
+                        Modifier
+                            .fillMaxSize()
+                            .padding(ringSize)
+                    )
+                }
+                actions(
                     Modifier
-                        .fillMaxSize()
-                        .padding(ringSize)
+                        .padding(start = 12.dp, bottom = 12.dp)
                 )
             }
 
@@ -98,6 +113,6 @@ fun ProfileStructure(
            }
         }
 
-        Spacer(modifier = Modifier.height(30.dp)) // This makes room for the offset avatar
+        Spacer(modifier = Modifier.height(60.dp)) // This makes room for the offset avatar
     }
 }
