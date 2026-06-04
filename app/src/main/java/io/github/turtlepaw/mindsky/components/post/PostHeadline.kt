@@ -10,21 +10,24 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.ClickableText
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Dns
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -47,9 +50,14 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import app.bsky.actor.ProfileViewBasic
 import app.bsky.labeler.GetServicesResponseViewUnion
+import coil3.compose.AsyncImage
+import coil3.compose.AsyncImagePainter
+import coil3.compose.SubcomposeAsyncImage
+import coil3.compose.SubcomposeAsyncImageContent
 import com.atproto.label.Label
 import com.ramcosta.composedestinations.generated.destinations.ProfileDestination
 import io.github.turtlepaw.mindsky.R
+import io.github.turtlepaw.mindsky.auth.getPdsUrlFromDid
 import io.github.turtlepaw.mindsky.components.Avatar
 import io.github.turtlepaw.mindsky.di.LocalLabelManager
 import io.github.turtlepaw.mindsky.di.LocalNavController
@@ -57,7 +65,8 @@ import io.github.turtlepaw.mindsky.preferences.AppPrefs
 import io.github.turtlepaw.mindsky.preferences.rememberPreference
 import io.github.turtlepaw.mindsky.utils.toRelativeTimeString
 import kotlinx.coroutines.launch
-import kotlinx.datetime.Instant
+import sh.christian.ozone.api.Did
+import kotlin.time.Instant
 
 private fun String.nullable(): String? {
     return if (isNullOrBlank()) {
@@ -68,7 +77,13 @@ private fun String.nullable(): String? {
 }
 
 @Composable
-fun PostHeadline(timestamp: Instant, author: ProfileViewBasic, density: PostDensity, showLabels: Boolean = false) {
+fun PostHeadline(
+    timestamp: Instant,
+    author: ProfileViewBasic,
+    density: PostDensity,
+    showLabels: Boolean = false,
+    showHandle: Boolean = true
+) {
     Column {
         Row(modifier = Modifier.fillMaxWidth()) {
             Box(modifier = Modifier.weight(1f)) {
@@ -91,7 +106,7 @@ fun PostHeadline(timestamp: Instant, author: ProfileViewBasic, density: PostDens
                             if (author.verification?.verifications?.isNotEmpty() != true) {
                                 Spacer(modifier = Modifier.size(5.dp))
                             }
-                            Text(
+                            if(showHandle) Text(
                                 text = "@${author.handle.handle}",
                                 style = MaterialTheme.typography.titleSmall.copy(
                                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
@@ -102,7 +117,7 @@ fun PostHeadline(timestamp: Instant, author: ProfileViewBasic, density: PostDens
                         }
                     }
 
-                    if(showLabels && density != PostDensity.Expanded) Labelers(author.labels)
+                    if (showLabels && density != PostDensity.Expanded) Labelers(author.labels)
                 }
             }
 
@@ -118,9 +133,11 @@ fun PostHeadline(timestamp: Instant, author: ProfileViewBasic, density: PostDens
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun Labelers(labels: List<Label>, large: Boolean = false){
+fun Labelers(labels: List<Label>?, large: Boolean = false) {
+    if (labels == null) return
+
     val nav = LocalNavController.current
     val labelManager = LocalLabelManager.current
     val labelers by labelManager.labelersDefinitionFlow.collectAsState()
@@ -174,7 +191,7 @@ fun Labelers(labels: List<Label>, large: Boolean = false){
                     focusedLabel!!.`val`
                 )
 
-                if(desciription != null){
+                if (desciription != null) {
                     Text(
                         desciription,
                         style = MaterialTheme.typography.bodyMedium
@@ -186,12 +203,18 @@ fun Labelers(labels: List<Label>, large: Boolean = false){
                 val annotatedString = buildAnnotatedString {
                     append("Labeled by ")
 
-                    withLink(
+                    addLink(
                         LinkAnnotation.Clickable(
                             tag = "handle",
                             styles = TextLinkStyles(
                                 style = SpanStyle(
                                     color = MaterialTheme.colorScheme.primary
+                                ),
+                                hoveredStyle = SpanStyle(
+                                    background = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
+                                ),
+                                pressedStyle = SpanStyle(
+                                    background = MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
                                 )
                             )
                         ) {
@@ -200,10 +223,11 @@ fun Labelers(labels: List<Label>, large: Boolean = false){
                                     ProfileDestination(focusedLabel!!.src.did).route
                                 )
                             }
-                        }
-                    ) {
-                        append("@$handle")
-                    }
+                        },
+                        start = length,
+                        end = length + "@$handle".length
+                    )
+                    append("@$handle")
                 }
 
                 Text(
@@ -219,7 +243,7 @@ fun Labelers(labels: List<Label>, large: Boolean = false){
 
 @Composable
 private fun AuthorNameWithBadges(author: ProfileViewBasic) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
+    FlowRow(verticalArrangement = Arrangement.Center) {
         Text(
             text = author.displayName?.nullable() ?: author.handle.handle,
             style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
@@ -227,7 +251,7 @@ private fun AuthorNameWithBadges(author: ProfileViewBasic) {
             overflow = TextOverflow.Ellipsis,
         )
 
-        if(author.labels.find { it.`val` == "bot" } != null){
+        if (author.labels?.find { it.`val` == "bot" } != null) {
             Robot(Modifier.size(23.dp))
         }
         if (author.verification?.verifications?.isNotEmpty() == true) {
@@ -262,13 +286,16 @@ fun LabelComponent(
                 shape = if (isLarge) MaterialTheme.shapes.medium else CircleShape
             )
             .clip(if (isLarge) MaterialTheme.shapes.medium else CircleShape)
-            .clickable(onClick  = onClick)
+            .clickable(onClick = onClick)
             .run {
-                if (isLarge) padding(horizontal = 5.dp, vertical = 2.dp) else padding(horizontal = 5.dp)
+                if (isLarge) padding(
+                    horizontal = 5.dp,
+                    vertical = 2.dp
+                ) else padding(horizontal = 5.dp)
             },
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(
-            if(isLarge) 2.dp else 2.dp,
+            if (isLarge) 2.dp else 2.dp,
             Alignment.CenterHorizontally
         )
     ) {
@@ -297,7 +324,7 @@ fun LabelComponent(
 fun GetServicesResponseViewUnion.getDisplayName(identifier: String): String {
     return when (this) {
         is GetServicesResponseViewUnion.LabelerView -> null
-        is GetServicesResponseViewUnion.LabelerViewDetailed -> this.value.policies.labelValueDefinitions.find { it.identifier == identifier }
+        is GetServicesResponseViewUnion.LabelerViewDetailed -> this.value.policies.labelValueDefinitions?.find { it.identifier == identifier }
             ?.locales?.find { it.lang.tag == "en" }?.name
 
         is GetServicesResponseViewUnion.Unknown -> null
@@ -307,7 +334,7 @@ fun GetServicesResponseViewUnion.getDisplayName(identifier: String): String {
 fun GetServicesResponseViewUnion.getDescription(identifier: String): String? {
     return when (this) {
         is GetServicesResponseViewUnion.LabelerView -> null
-        is GetServicesResponseViewUnion.LabelerViewDetailed -> this.value.policies.labelValueDefinitions.find { it.identifier == identifier }
+        is GetServicesResponseViewUnion.LabelerViewDetailed -> this.value.policies.labelValueDefinitions?.find { it.identifier == identifier }
             ?.locales?.find { it.lang.tag == "en" }?.description
 
         is GetServicesResponseViewUnion.Unknown -> null
@@ -353,7 +380,51 @@ fun Checkmark(modifier: Modifier) {
 }
 
 @Composable
-fun Robot(modifier: Modifier){
+fun PdsIcon(did: Did, modifier: Modifier) {
+    var pds by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(Unit) {
+        val pdsUrl = getPdsUrlFromDid(did.did)
+        pds = pdsUrl.replace("https://", "").replace("http://", "").replace("/", "")
+    }
+
+    PdsIcon(pds, modifier)
+}
+
+@Composable
+fun PdsIcon(pds: String?, modifier: Modifier) {
+    if (pds != null) Box(
+        modifier = Modifier.padding(start = 3.dp)
+    ) {
+        SubcomposeAsyncImage(
+            model = "https://twenty-icons.com/${pds}",
+            contentDescription = "PDS Icon",
+            modifier = Modifier
+                .clip(MaterialTheme.shapes.small)
+                .then(modifier)
+                .background(
+                    MaterialTheme.colorScheme.surfaceVariant
+                )
+        ) {
+            val state by painter.state.collectAsState()
+            if (state is AsyncImagePainter.State.Success) {
+                SubcomposeAsyncImageContent()
+            } else if (state is AsyncImagePainter.State.Error) {
+                Icon(
+                    Icons.Rounded.Dns,
+                    contentDescription = "PDS Icon",
+                    tint = MaterialTheme.colorScheme.onSurface.copy(0.5f),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(5.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun Robot(modifier: Modifier) {
     Icon(
         painterResource(R.drawable.ic_bot),
         contentDescription = "Bot",

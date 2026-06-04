@@ -13,7 +13,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
-import sh.christian.ozone.api.AuthenticatedXrpcBlueskyApi
+import sh.christian.ozone.BlueskyApi
 
 @Serializable
 data class LabelerConfig(
@@ -52,7 +52,7 @@ class LabelerCache(private val context: Context) {
         }
     }
 
-    suspend fun getLabelers(blueskyApi: AuthenticatedXrpcBlueskyApi?): List<String> {
+    suspend fun getLabelers(blueskyApi: BlueskyApi?): List<String> {
         val cached = getCachedConfig()
         val now = System.currentTimeMillis()
 
@@ -65,7 +65,7 @@ class LabelerCache(private val context: Context) {
         return fetchAndCacheLabelers(blueskyApi)
     }
 
-    suspend fun fetchAndCacheLabelers(blueskyApi: AuthenticatedXrpcBlueskyApi?): List<String> {
+    suspend fun fetchAndCacheLabelers(blueskyApi: BlueskyApi?): List<String> {
         return try {
             val fresh = fetchFreshLabelers(blueskyApi)
             saveToCache(fresh)
@@ -77,7 +77,7 @@ class LabelerCache(private val context: Context) {
         }
     }
 
-    private suspend fun fetchFreshLabelers(blueskyApi: AuthenticatedXrpcBlueskyApi?): List<String> {
+    private suspend fun fetchFreshLabelers(blueskyApi: BlueskyApi?): List<String> {
         if (blueskyApi == null) {
             Log.w("LabelerCache", "BlueskyApi not available, using fallback labelers")
             return fallbackLabelers
@@ -85,7 +85,7 @@ class LabelerCache(private val context: Context) {
 
         return try {
             val prefs: PreferencesUnion.LabelersPref =
-                blueskyApi.getPreferences().requireResponse().preferences
+                blueskyApi.getPreferencesForActor().requireResponse().preferences
                     .filterIsInstance<PreferencesUnion.LabelersPref>()
                     .first()
 
@@ -127,7 +127,7 @@ class LabelerCache(private val context: Context) {
         }
     }
 
-    fun forceRefresh(blueskyApi: AuthenticatedXrpcBlueskyApi?) {
+    fun forceRefresh(blueskyApi: BlueskyApi?) {
         Log.d("LabelerCache", "Force refresh requested")
         CoroutineScope(Dispatchers.IO).launch {
             fetchAndCacheLabelers(blueskyApi)

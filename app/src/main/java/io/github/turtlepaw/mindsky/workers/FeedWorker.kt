@@ -31,7 +31,7 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import sh.christian.ozone.api.AtUri
-import sh.christian.ozone.api.AuthenticatedXrpcBlueskyApi
+import sh.christian.ozone.BlueskyApi
 import kotlin.random.Random
 
 class FeedWorker(
@@ -129,7 +129,7 @@ class FeedWorker(
     }
 
     suspend fun getFamiliarFeeds(
-        api: AuthenticatedXrpcBlueskyApi,
+        api: BlueskyApi,
         onTimelineProgress: suspend (fetchedCount: Int, targetCount: Int) -> Unit,
         onDiscoveryProgress: suspend (fetchedCount: Int, targetCount: Int) -> Unit
     ): List<FeedViewPost> = withContext(Dispatchers.IO) {

@@ -1,7 +1,7 @@
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
-    id("com.google.devtools.ksp") version "2.2.0-2.0.2"
+    id("com.google.devtools.ksp") version "2.3.2"
     id("io.objectbox")
     kotlin("plugin.serialization") version "2.1.20"
     alias(libs.plugins.compose.compiler)
@@ -10,7 +10,7 @@ plugins {
 
 android {
     namespace = "io.github.turtlepaw.mindsky"
-    compileSdk = 36
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "io.github.turtlepaw.mindsky"
@@ -42,6 +42,7 @@ android {
     }
     kotlinOptions {
         jvmTarget = "11"
+        freeCompilerArgs += "-opt-in=kotlin.time.ExperimentalTime"
     }
     buildFeatures {
         compose = true
@@ -117,4 +118,11 @@ dependencies {
         //lexicons("sh.christian.ozone:lexicons:2026.04.22")
     //api(libs.oauth)
     api(libs.bluesky)
+
+    // ml
+    implementation("com.google.mlkit:genai-image-description:1.0.0-beta1")
+
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.11.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-guava:1.11.0")
+
 }

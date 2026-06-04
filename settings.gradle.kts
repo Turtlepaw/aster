@@ -38,4 +38,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "Mindsky"
 include(":app")
- 
+includeBuild("ozone")

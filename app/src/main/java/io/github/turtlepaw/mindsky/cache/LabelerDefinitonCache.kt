@@ -10,7 +10,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
-import sh.christian.ozone.api.AuthenticatedXrpcBlueskyApi
+import sh.christian.ozone.BlueskyApi
 import sh.christian.ozone.api.Did
 
 @Serializable
@@ -67,7 +67,7 @@ class LabelerDefCache(context: Context) {
 
     suspend fun getDefinitions(
         labelerDids: List<String>,
-        blueskyApi: AuthenticatedXrpcBlueskyApi
+        blueskyApi: BlueskyApi
     ): Map<String, GetServicesResponseViewUnion> {
         val cached = _definitionsFlow.value
         val missing = labelerDids.filter { it !in cached }
@@ -90,7 +90,7 @@ class LabelerDefCache(context: Context) {
 
     private suspend fun fetchDefinitions(
         labelerDids: List<Did>,
-        blueskyApi: AuthenticatedXrpcBlueskyApi
+        blueskyApi: BlueskyApi
     ): Map<String, GetServicesResponseViewUnion> {
         return try {
             val response = blueskyApi.getServices(

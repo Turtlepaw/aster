@@ -5,6 +5,7 @@ import androidx.activity.compose.PredictiveBackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -81,12 +82,14 @@ import com.ramcosta.composedestinations.generated.destinations.FullsizePostDesti
 import com.ramcosta.composedestinations.generated.destinations.ImageDestination
 import com.ramcosta.composedestinations.generated.destinations.ProfileDestination
 import com.ramcosta.composedestinations.navigation.DestinationsNavigator
-import io.github.turtlepaw.fetch_and_cache.SingleCache
+import io.github.turtlepaw.fetch_and_cache.CollectionCache
 import io.github.turtlepaw.mindsky.R
+import io.github.turtlepaw.mindsky.auth.getPdsUrlFromDid
 import io.github.turtlepaw.mindsky.components.Avatar
 import io.github.turtlepaw.mindsky.components.post.Checkmark
 import io.github.turtlepaw.mindsky.components.post.LabelComponent
 import io.github.turtlepaw.mindsky.components.post.Labelers
+import io.github.turtlepaw.mindsky.components.post.PdsIcon
 import io.github.turtlepaw.mindsky.components.post.PostComponent
 import io.github.turtlepaw.mindsky.components.post.Robot
 import io.github.turtlepaw.mindsky.components.post.getAvatar
@@ -101,14 +104,17 @@ import io.github.turtlepaw.mindsky.di.LocalNavController
 import io.github.turtlepaw.mindsky.di.LocalProfileRepository
 import io.github.turtlepaw.mindsky.di.LocalScrollToTop
 import io.github.turtlepaw.mindsky.di.LocalSessionManager
+import io.github.turtlepaw.mindsky.routes.LoadMore
 import io.github.turtlepaw.mindsky.routes.Loading
 import io.github.turtlepaw.mindsky.utils.Formatters
+import io.github.turtlepaw.mindsky.viewmodels.FeedViewModel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.collect
 import sh.christian.ozone.api.Did
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import kotlin.time.ExperimentalTime
 
 private val startPadding = 10.dp
 
@@ -119,13 +125,17 @@ private data class TabDestination(
 
 enum class BadgeInfoType {
     Bot,
-    Verified
+    Verified,
+    Pds
 }
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class,
+    ExperimentalTime::class
+)
 @Composable
 fun BadgeInformationSheet(
     badge: BadgeInfoType?,
+    pds: String?,
     profileData: ProfileViewDetailed,
     onDismiss: () -> Unit,
     navigator: DestinationsNavigator
@@ -147,10 +157,29 @@ fun BadgeInformationSheet(
             ) {
                 if (badge == BadgeInfoType.Bot) {
                     Text("This account is labeled as automated.")
+                } else if(badge == BadgeInfoType.Pds){
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        PdsIcon(
+                            pds,
+                            Modifier.size(24.dp)
+                        )
+
+                        Text(
+                            pds ?: "",
+                            style = MaterialTheme.typography.titleMediumEmphasized
+                        )
+                    }
+
+                    Text(
+                        "This account is hosted on $pds"
+                    )
                 } else if (badge == BadgeInfoType.Verified) {
                     val api = LocalMindskyApi.current
 
-                    val accounts = SingleCache(
+                    val accounts = CollectionCache(
                         identifier = "verification_accounts_${profileData.did.did}",
                         serializer = ProfileViewDetailed.serializer(),
                         fetcher = {
@@ -279,12 +308,27 @@ fun BadgeInformationSheet(
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Destination<RootGraph>
 @Composable
-fun Profile(navigator: DestinationsNavigator, identity: String) {
-    var profileData by remember { mutableStateOf<ProfileViewDetailed?>(null) }
-    var isLoading by remember { mutableStateOf(true) }
-    val repository = LocalProfileRepository.current
+fun Profile(navigator: DestinationsNavigator, did: String? = null) {
+    val viewModel = LocalFeedModel.current
+    val profileData by viewModel.profileDetailed
+    val isLoading by viewModel.isFetchingProfileMetadata
+
+    val session by LocalSessionManager.current.sessionFlow.collectAsState()
+    val identity = did ?: session?.did
+
+    if (identity == null) {
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Text("Not logged in")
+        }
+        return
+    }
+
     val api = LocalMindskyApi.current
-    val posts = rememberPosts(Did(identity))
+    val posts = if (identity.isNotBlank()) {
+        rememberPosts(Did(identity))
+    } else {
+        null
+    }
     val hasBackStack = LocalNavController.current.previousBackStackEntry != null
     val listState = rememberLazyListState()
     val scrollToTopHandler = LocalScrollToTop.current
@@ -299,7 +343,7 @@ fun Profile(navigator: DestinationsNavigator, identity: String) {
         val handler: () -> Unit = {
             coroutineScope.launch {
                 listState.animateScrollToItem(0)
-                posts.refresh()
+                posts?.refresh()
             }
             Unit
         }
@@ -310,13 +354,14 @@ fun Profile(navigator: DestinationsNavigator, identity: String) {
             }
         }
     }
-    val userDid = LocalSessionManager.current.getSession()?.did
+    val userDid = session?.did
 
-    LaunchedEffect(identity) {
-        if (profileData == null || profileData?.did?.did != identity) {
-            isLoading = true
-            profileData = repository.getProfile(Did(identity))
-            isLoading = false
+    LaunchedEffect(identity, viewModel) {
+        if (identity != null && identity.isNotBlank() && identity.startsWith("did:")) {
+            val did = try { Did(identity) } catch (e: Exception) { null }
+            if (did != null) {
+                viewModel.fetchProfileMetadata(did)
+            }
         }
     }
 
@@ -331,9 +376,17 @@ fun Profile(navigator: DestinationsNavigator, identity: String) {
         ),
     )
 
+    var pds by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(identity) {
+        val pdsUrl = getPdsUrlFromDid(identity)
+        pds = pdsUrl.replace("https://", "").replace("http://", "").replace("/", "")
+    }
+
     if (!isLoading && profileData != null) {
         BadgeInformationSheet(
             badge = badgeShown,
+            pds = pds,
             profileData = profileData!!,
             onDismiss = { badgeShown = null },
             navigator = navigator
@@ -341,8 +394,20 @@ fun Profile(navigator: DestinationsNavigator, identity: String) {
     }
 
     Scaffold { paddingValues ->
+        val safeDid = remember(identity) {
+            if (identity.isBlank() || !identity.startsWith("did:")) null
+            else try { Did(identity) } catch (e: Exception) { null }
+        }
+        
+        if (safeDid == null) {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text(if (identity.isBlank()) "Profile not specified" else "Invalid profile: $identity")
+            }
+            return@Scaffold
+        }
+        
         CompositionLocalProvider(
-            LocalIdentityProvider provides Did(identity)
+            LocalIdentityProvider provides safeDid
         ) {
             LazyColumn(
                 state = listState,
@@ -409,7 +474,7 @@ fun Profile(navigator: DestinationsNavigator, identity: String) {
                             },
                             actions = {
                                 Row {
-                                    ToggleButton(
+                                    if(identity != userDid) ToggleButton(
                                         checked = profileData!!.viewer?.following == null,
                                         onCheckedChange = {}
                                     ) {
@@ -449,7 +514,7 @@ fun Profile(navigator: DestinationsNavigator, identity: String) {
                                 profileData!!.displayName ?: profileData!!.handle.handle,
                                 style = MaterialTheme.typography.headlineMedium,
                             )
-                            if (profileData!!.labels.find { it.`val` == "bot" } != null) {
+                            if (profileData!!.labels?.find { it.`val` == "bot" } != null) {
                                 Robot(
                                     Modifier
                                         .size(25.dp)
@@ -466,16 +531,24 @@ fun Profile(navigator: DestinationsNavigator, identity: String) {
                                         }
                                 )
                             }
+                            PdsIcon(
+                                pds,
+                                Modifier
+                                    .size(20.dp)
+                                    .clickable {
+                                        badgeShown = BadgeInfoType.Pds
+                                    }
+                            )
                         }
                     }
                     item {
                         FlowRow(
-                            modifier = Modifier.padding(start = startPadding)
+                            modifier = Modifier.padding(start = startPadding),
+                            horizontalArrangement = Arrangement.spacedBy(5.dp),
                         ) {
                             if (profileData!!.viewer?.followedBy != null) {
                                 Box(
                                     modifier = Modifier
-                                        .padding(end = 5.dp)
                                         .background(
                                             MaterialTheme.colorScheme.surfaceContainer,
                                             RoundedCornerShape(8.dp)
@@ -499,7 +572,14 @@ fun Profile(navigator: DestinationsNavigator, identity: String) {
                                 ),
                             )
 
-// pronouns
+                            // pronouns
+                            if(profileData!!.pronouns != null)
+                            Text(
+                                profileData!!.pronouns!!,
+                                style = MaterialTheme.typography.bodyMedium.copy(
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                ),
+                            )
                         }
                     }
                     item {
@@ -550,10 +630,13 @@ fun Profile(navigator: DestinationsNavigator, identity: String) {
                         Spacer(modifier = Modifier.height(16.dp))
                     }
                     item {
-                        Text(
-                            profileData!!.description ?: "",
-                            modifier = Modifier.padding(start = startPadding),
-                        )
+                        SelectionContainer {
+                            Text(
+                                profileData!!.description ?: "",
+                                modifier = Modifier.padding(start = startPadding),
+                                style = MaterialTheme.typography.bodyLarge
+                            )
+                        }
                     }
                     item {
                         Spacer(modifier = Modifier.height(16.dp))
@@ -562,7 +645,9 @@ fun Profile(navigator: DestinationsNavigator, identity: String) {
                         val followedBy = profileData!!.viewer?.knownFollowers
                         if (followedBy != null && identity != userDid) {
                             Row(
-                                modifier = Modifier.padding(start = startPadding),
+                                modifier = Modifier.padding(start = startPadding).clickable {
+
+                                },
                                 horizontalArrangement = Arrangement.spacedBy(46.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
@@ -604,7 +689,7 @@ fun Profile(navigator: DestinationsNavigator, identity: String) {
                         Box(
                             modifier = Modifier.padding(start = startPadding)
                         ) {
-                            Labelers(profileData!!.labels, true)
+                            Labelers(profileData!!?.labels, true)
                         }
                     }
                     item {
@@ -645,7 +730,11 @@ fun Profile(navigator: DestinationsNavigator, identity: String) {
                         }
                     }
                     if (selectedDestination == 0) {
-                        ProfilePosts(posts, navigator)
+                        if (posts != null) {
+                            ProfilePosts(posts, navigator, viewModel)
+                        } else {
+                            Loading()
+                        }
                     } else {
                         tangled(identity, navigator)
                     }
@@ -697,12 +786,16 @@ private fun rememberPosts(account: Did): RememberedPosts {
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 private fun LazyListScope.ProfilePosts(
     posts: RememberedPosts,
-    navigator: DestinationsNavigator
+    navigator: DestinationsNavigator,
+    api: FeedViewModel
 ) {
-    if (posts.isLoading.value) {
+    if (posts.isLoading.value && posts.posts.value.isEmpty()) {
         Loading()
     } else {
-        items(posts.posts.value) {
+        items(
+            items = posts.posts.value,
+            key = { it.post.uri.atUri }
+        ) {
             PostComponent(
                 it,
                 navigator
@@ -712,20 +805,15 @@ private fun LazyListScope.ProfilePosts(
                 )
             }
         }
-        item {
-            val api = LocalFeedModel.current
-            LaunchedEffect(Unit) {
-                api.loadMoreProfilePosts()
+        if (posts.posts.value.isNotEmpty() && api.hasMoreProfile.value) {
+            item {
+                LoadMore(posts.posts.value.size) {
+                    api.loadMoreProfilePosts()
+                }
             }
-
-            Box(
-                modifier = Modifier.fillMaxWidth(),
-                contentAlignment = Alignment.Center
-            ) {
-                LoadingIndicator(
-                    modifier = Modifier
-                        .padding(16.dp),
-                )
+        } else {
+            item {
+                Spacer(modifier = Modifier.height(150.dp))
             }
         }
     }

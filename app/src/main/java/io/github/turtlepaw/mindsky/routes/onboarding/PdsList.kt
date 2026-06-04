@@ -11,6 +11,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.AlternateEmail
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Coffee
 import androidx.compose.material.icons.rounded.LocalCafe
@@ -21,6 +22,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
@@ -32,11 +36,15 @@ import androidx.compose.ui.unit.dp
 import com.ramcosta.composedestinations.annotation.Destination
 import com.ramcosta.composedestinations.annotation.RootGraph
 import com.ramcosta.composedestinations.generated.destinations.CustomPdsDestination
+import com.ramcosta.composedestinations.generated.destinations.FeedDestination
 import com.ramcosta.composedestinations.generated.destinations.LoginDestination
 import com.ramcosta.composedestinations.navigation.DestinationsNavigator
 import io.github.turtlepaw.mindsky.R
+import io.github.turtlepaw.mindsky.auth.AuthState
 import io.github.turtlepaw.mindsky.components.Avatar
+import io.github.turtlepaw.mindsky.replaceCurrent
 import io.github.turtlepaw.mindsky.routes.settings.TopAppBarCommon
+import io.github.turtlepaw.mindsky.viewmodels.rememberAuthViewModel
 
 data class Pds(
     val iconUrl: String?,
@@ -67,13 +75,13 @@ data class Pds(
             iconUrl = null,
             name = "selfhosted.social",
             description = "PDS run by @baileytownsend.dev",
-            url = "https://selfhosted.social/"
+            url = "https://selfhosted.social"
         )
 
         val CustomPds = Pds(
             iconUrl = null,
-            name = "Your own PDS",
-            description = "You can also run your own PDS. If you have one, enter the URL below.",
+            name = "Login with your handle",
+            description = "Login with your internet handle",
             url = ""
         )
 
@@ -83,7 +91,16 @@ data class Pds(
 
 @Destination<RootGraph>
 @Composable
-fun PdsList(navigator: DestinationsNavigator) {
+fun PdsList(navigator: DestinationsNavigator, isOnboarding: Boolean = true) {
+    val authViewModel = rememberAuthViewModel()
+    val authState by authViewModel.authState.collectAsState()
+
+    LaunchedEffect(authState) {
+        if (authState is AuthState.Authenticated && isOnboarding) {
+            navigator.replaceCurrent(FeedDestination)
+        }
+    }
+    
     val viewModel = rememberOnboardingViewModel()
     Scaffold(
         topBar = {
@@ -108,8 +125,8 @@ fun PdsList(navigator: DestinationsNavigator) {
                     viewModel.pds = pds.url
                     navigator.navigate(
                         if (pds.url.isNullOrBlank())
-                            CustomPdsDestination
-                        else LoginDestination(pds.url)
+                            CustomPdsDestination(isOnboarding)
+                        else LoginDestination(pds.url, isOnboarding)
                     )
                 }
             }
@@ -158,7 +175,12 @@ fun PdsItem(pds: Pds, index: Int, listSize: Int, onClick: () -> Unit) {
                             contentDescription = "Local Cafe",
                             clip = MaterialTheme.shapes.large
                         )
-                        Pds.CustomPds -> null
+                        Pds.CustomPds -> Icon(
+                            Icons.Rounded.AlternateEmail,
+                            contentDescription = "At sign",
+                            modifier = Modifier.size(50.dp).padding(10.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
                 }
 

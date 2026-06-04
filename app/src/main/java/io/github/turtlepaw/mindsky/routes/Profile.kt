@@ -48,6 +48,9 @@ import com.ramcosta.composedestinations.generated.destinations.FullsizePostDesti
 import com.ramcosta.composedestinations.generated.destinations.InitialOnboardingDestination
 import com.ramcosta.composedestinations.generated.destinations.LoginDestination
 import com.ramcosta.composedestinations.navigation.DestinationsNavigator
+import androidx.compose.foundation.clickable
+import com.ramcosta.composedestinations.generated.destinations.PdsListDestination
+import io.github.turtlepaw.mindsky.components.AccountSwitcherSheet
 import io.github.turtlepaw.mindsky.components.Avatar
 import io.github.turtlepaw.mindsky.components.post.PostComponent
 import io.github.turtlepaw.mindsky.components.post.PostInsightsContext
@@ -55,10 +58,13 @@ import io.github.turtlepaw.mindsky.db.Engagement
 import io.github.turtlepaw.mindsky.db.ObjectBox
 import io.github.turtlepaw.mindsky.di.LocalMindskyApi
 import io.github.turtlepaw.mindsky.di.LocalProfileModel
+import io.github.turtlepaw.mindsky.di.LocalSessionManager
 import io.github.turtlepaw.mindsky.di.LocalScrollToTop
 import io.github.turtlepaw.mindsky.replaceCurrent
+import io.github.turtlepaw.mindsky.routes.onboarding.PdsList
 import io.github.turtlepaw.mindsky.utils.ApiUtils.fetchChunkedPosts
 import io.github.turtlepaw.mindsky.viewmodels.ProfileUiState
+import io.github.turtlepaw.mindsky.viewmodels.rememberAuthViewModel
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class, ExperimentalMaterial3Api::class)
@@ -70,6 +76,8 @@ fun MyProfile(navigator: DestinationsNavigator) {
     val listState = rememberLazyListState()
     val scrollToTopHandler = LocalScrollToTop.current
     val coroutineScope = rememberCoroutineScope()
+    
+    var isAccountSwitcherOpen by remember { mutableStateOf(false) }
 
     DisposableEffect(listState) {
         val handler: () -> Unit = {
@@ -86,7 +94,7 @@ fun MyProfile(navigator: DestinationsNavigator) {
         }
     }
 
-    LaunchedEffect(Unit) {
+    LaunchedEffect(api) {
         val box = ObjectBox.store.boxFor(Engagement::class.java)
         val all = box.all
         Log.d("Profile", "Found ${all.size} likes")
@@ -97,6 +105,16 @@ fun MyProfile(navigator: DestinationsNavigator) {
 
     val profileModel = LocalProfileModel.current
     val profileUiState by profileModel.uiState.collectAsState()
+    val authViewModel = rememberAuthViewModel()
+
+    AccountSwitcherSheet(
+        isOpen = isAccountSwitcherOpen,
+        onDismiss = { isAccountSwitcherOpen = false },
+        onAddAccount = {
+            isAccountSwitcherOpen = false
+            navigator.navigate(PdsListDestination(isOnboarding = false))
+        }
+    )
 
     Scaffold(
         topBar = {
@@ -134,7 +152,10 @@ fun MyProfile(navigator: DestinationsNavigator) {
                         Row(
                             modifier = Modifier
                                 .padding(16.dp)
-                                .fillMaxWidth(),
+                                .fillMaxWidth()
+                                .clickable {
+                                    isAccountSwitcherOpen = true
+                                },
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(
                                 15.dp,
@@ -158,8 +179,7 @@ fun MyProfile(navigator: DestinationsNavigator) {
             item {
                 Button(
                     onClick = {
-                        navigator.popBackStack()
-                        navigator.replaceCurrent(InitialOnboardingDestination)
+                        authViewModel.signOut()
                     },
                     modifier = Modifier
                         .padding(16.dp)

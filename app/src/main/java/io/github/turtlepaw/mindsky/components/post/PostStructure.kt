@@ -19,8 +19,9 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import kotlinx.datetime.toJavaInstant
-import java.time.Instant
+import java.time.Instant as JavaInstant
+import kotlin.time.Instant as KotlinInstant
+import kotlin.time.toJavaInstant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
@@ -37,13 +38,14 @@ fun PostStructure(
     metadata: @Composable () -> Unit,
     actions: @Composable (modifier: Modifier) -> Unit,
     impressions: @Composable (modifier: Modifier) -> Unit,
+    modifier: Modifier = Modifier,
     showImpressions: Boolean = true,
     discoveryContext: @Composable (modifier: Modifier) -> Unit = {},
     density: PostDensity = PostDensity.Regular,
     onClick: (() -> Unit)? = null,
-    createdAt: kotlinx.datetime.Instant,
+    createdAt: KotlinInstant,
     showSeparator: Boolean = true,
-    content: @Composable () -> Unit
+    content: @Composable () -> Unit,
 ) {
     CompositionLocalProvider(
         LocalPostDensity provides density
@@ -51,6 +53,7 @@ fun PostStructure(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .then(modifier)
                 .then(
                     if (onClick != null) {
                         Modifier.clickable { onClick() }
@@ -162,7 +165,7 @@ fun PostStructure(
     }
 }
 
-fun Instant.toFormattedString(zoneId: ZoneId = ZoneId.systemDefault()): String {
+fun JavaInstant.toFormattedString(zoneId: ZoneId = ZoneId.systemDefault()): String {
     val formatter = DateTimeFormatter.ofPattern("MMMM d, yyyy 'at' h:mma")
     return this.atZone(zoneId)
         .toLocalDateTime()

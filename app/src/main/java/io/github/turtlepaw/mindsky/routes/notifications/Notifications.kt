@@ -28,8 +28,32 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import android.util.Log
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.LoadingIndicator
+import androidx.compose.material3.LocalTextStyle
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.zIndex
 import app.bsky.feed.Post
 import app.bsky.feed.PostView
 import app.bsky.notification.ListNotificationsNotification
@@ -43,36 +67,71 @@ import io.github.turtlepaw.fetch_and_cache.InfiniteCache
 import io.github.turtlepaw.mindsky.R
 import io.github.turtlepaw.mindsky.components.Avatar
 import io.github.turtlepaw.mindsky.components.ErrorMessage
+import io.github.turtlepaw.mindsky.components.post.PostComponent
 import io.github.turtlepaw.mindsky.components.post.PostDensity
 import io.github.turtlepaw.mindsky.di.LocalFeedModel
 import io.github.turtlepaw.mindsky.di.LocalMindskyApi
+import io.github.turtlepaw.mindsky.di.LocalScrollToTop
+import io.github.turtlepaw.mindsky.routes.LoadMore
 import io.github.turtlepaw.mindsky.routes.Loading
 import io.github.turtlepaw.mindsky.routes.settings.TopAppBarCommon
 import io.github.turtlepaw.mindsky.utils.ApiUtils.fetchChunkedPosts
+import kotlinx.coroutines.launch
 import sh.christian.ozone.api.AtUri
 
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Destination<RootGraph>
 @Composable
 fun Notifications(navigator: DestinationsNavigator) {
     val api = LocalMindskyApi.current
     val feedModel = LocalFeedModel.current
     val context = LocalContext.current
-    val notifications = InfiniteCache<ListNotificationsNotification>(
-        fetcher = { cursor ->
-            val result = api.listNotifications(
-                ListNotificationsQueryParams(
-                    limit = 50,
-                    cursor = cursor,
-                )
-            ).requireResponse()
+    val notifications =
+        remember(
+            api
+        ) {
+            InfiniteCache<ListNotificationsNotification>(
+                fetcher = { cursor ->
+                    val result = api.listNotifications(
+                        ListNotificationsQueryParams(
+                            limit = 50,
+                            cursor = cursor,
+                        )
+                    ).requireResponse()
 
-            result.cursor to result.notifications
-        },
-        serializer = ListNotificationsNotification.serializer(),
-        identifier = "notifications_cache",
-        context = context
-    ).load()
+                    result.cursor to result.notifications
+                },
+                serializer = ListNotificationsNotification.serializer(),
+                identifier = "notifications_cache",
+                context = context
+            )
+        }
+            .load()
 
+    val scrollToTopHandler = LocalScrollToTop.current
+    val coroutineScope = rememberCoroutineScope()
+    val listState = rememberLazyListState()
+
+    DisposableEffect(listState) {
+        val handler: () -> Unit = {
+            coroutineScope.launch {
+                listState.animateScrollToItem(0)
+                notifications.refresh?.invoke()
+            }
+            Unit
+        }
+        scrollToTopHandler.value = handler
+        onDispose {
+            if (scrollToTopHandler.value === handler) {
+                scrollToTopHandler.value = null
+            }
+        }
+    }
+
+
+    LaunchedEffect(notifications.value) {
+        Log.d("Notifications", "Notifications updated: ${notifications.value?.size}")
+    }
     val notificationItems = remember(notifications.value) {
         buildNotificationItems(notifications.value ?: emptyList())
     }
@@ -118,144 +177,270 @@ fun Notifications(navigator: DestinationsNavigator) {
     }
 
     Scaffold(
-        topBar = { TopAppBarCommon.withBack(navigator, R.string.notifications) },
+        topBar = {
+            TopAppBar(
+                title = {
+                    Text(
+                        stringResource(R.string.notifications),
+                    )
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = Color.Transparent,
+                    scrolledContainerColor = Color.Transparent,
+                ),
+                modifier = Modifier.zIndex(10f)
+            )
+        },
     ) { paddingValues ->
-        LazyColumn(
-            contentPadding = paddingValues,
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            if(notifications.isLoading && notifications.value.isNullOrEmpty()){
-                Loading()
-            } else if(notifications.error != null){
-                item {
-                    Text("Error: ${notifications.error}")
+        val pullToRefreshState = rememberPullToRefreshState()
+        PullToRefreshBox(
+            isRefreshing = notifications.isLoading,
+            onRefresh = {
+                coroutineScope.launch {
+                    notifications.refresh?.invoke()
                 }
-            } else {
-                items(
-                    notificationItems,
-                    key = { item -> notificationKey(item) }
-                ){ item ->
-                    val targetUri = notificationPostUri(item)
-                    val post = targetUri?.let { postLookup[it.atUri] }
+            },
+            state = pullToRefreshState,
+            indicator = {
+                PullToRefreshDefaults.Indicator(
+                    state = pullToRefreshState,
+                    isRefreshing = notifications.isLoading,
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(top = paddingValues.calculateTopPadding())
+                        .zIndex(5f)
+                )
+            },
+            modifier = Modifier.fillMaxSize()
+        ) {
+            LazyColumn(
+                state = listState,
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .zIndex(0.5f)
+            ) {
+                item {
+                    Spacer(modifier = Modifier.height(130.dp))
+                }
+                if (notifications.isLoading && notifications.value.isNullOrEmpty()) {
+                    Loading()
+                } else if (notifications.error != null) {
+                    item {
+                        Text("Error: ${notifications.error}")
+                    }
+                } else {
+                    items(
+                        notificationItems,
+                        key = { item -> notificationKey(item) }
+                    ) { item ->
+                        val targetUri = notificationPostUri(item)
+                        val post = targetUri?.let { postLookup[it.atUri] }
+                        val onClick = {
+                            if (post != null) navigator.navigate(FullsizePostDestination(post.uri.atUri))
+                        }
 
-                    val snippetContent: (@Composable () -> Unit)? = if (targetUri != null) {
-                        {
-                            when {
-                                post != null -> {
-                                    PostSnippet(post) {
-                                        navigator.navigate(FullsizePostDestination(post.uri.atUri))
+                        val snippetContent: (@Composable () -> Unit)? = if (targetUri != null) {
+                            {
+                                when {
+                                    post != null -> {
+                                        PostSnippet(post)
+                                    }
+
+                                    isPostsLoading -> {
+                                        Text(
+                                            "Loading post\u2026",
+                                            style = MaterialTheme.typography.bodySmall.copy(
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        )
+                                    }
+
+                                    postsError != null -> {
+                                        ErrorMessage()
+                                    }
+
+                                    else -> {
+                                        ErrorMessage()
                                     }
                                 }
-                                isPostsLoading -> {
-                                    Text(
-                                        "Loading post\u2026",
-                                        style = MaterialTheme.typography.bodySmall.copy(
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
+                            }
+                        } else {
+                            null
+                        }
+
+                        val modifier = Modifier
+                            .fillMaxWidth()
+                            .run {
+                                if (item.isRead) {
+                                    this
+                                } else {
+                                    this.background(
+                                        MaterialTheme.colorScheme.primaryContainer.copy(0.15f)
                                     )
                                 }
-                                postsError != null -> {
-                                    ErrorMessage()
-                                }
-                                else -> {
-                                    ErrorMessage()
-                                }
                             }
-                        }
-                    } else {
-                        null
-                    }
+                            .clickable { onClick() }
+                            .padding(horizontal = 14.dp)
+                            .padding(vertical = 6.dp)
 
-                    when (item) {
-                        is NotificationItem.GroupedPostActivity -> {
-                            val message = notificationMessage(
-                                reasonKey = item.reasonKey,
-                                reasonLabel = item.reasonLabel,
-                                names = item.notifications.takeAsString(3)
-                            )
-                            NotificationStack(
-                                reasonKey = item.reasonKey,
-                                reasonLabel = item.reasonLabel,
-                                modifier = Modifier.padding(horizontal = 14.dp),
-                                avatarContent = {
-                                    Row(
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                        verticalAlignment = Alignment.Top
+                        when (item) {
+                            is NotificationItem.GroupedPostActivity -> {
+                                val message = notificationMessage(
+                                    reasonKey = item.reasonKey,
+                                    reasonLabel = item.reasonLabel,
+                                    names = item.notifications.takeAsString(3)
+                                )
+                                NotificationStack(
+                                    reasonKey = item.reasonKey,
+                                    reasonLabel = item.reasonLabel,
+                                    modifier = modifier,
+                                    avatarContent = {
+                                        Row(
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                            verticalAlignment = Alignment.Top
+                                        ) {
+                                            item.notifications.take(5).forEach { notification ->
+                                                Avatar(
+                                                    avatarUrl = notification.author.avatar?.uri,
+                                                    contentDescription = notification.author.displayName
+                                                        ?: notification.author.handle.handle,
+                                                    modifier = Modifier
+                                                        .size(34.dp)
+                                                        .clickable {
+                                                            navigator.navigate(
+                                                                ProfileDestination(
+                                                                    notification.author.did.did
+                                                                )
+                                                            )
+                                                        }
+                                                )
+                                            }
+                                            if (item.notifications.size > 5) {
+                                                Text(
+                                                    "+${item.notifications.size - 5}",
+                                                    style = MaterialTheme.typography.bodySmall.copy(
+                                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                    ),
+                                                    modifier = Modifier.padding(4.dp)
+                                                )
+                                            }
+                                        }
+                                    },
+                                    message = message,
+                                    snippetContent = snippetContent
+                                )
+                            }
+
+                            is NotificationItem.Single -> {
+                                val reason = reasonInfo(item.notification.reason)
+                                val authorName = item.notification.author.displayName
+                                    ?: item.notification.author.handle.handle
+                                val message = notificationMessage(
+                                    reasonKey = reason.key,
+                                    reasonLabel = reason.label,
+                                    names = authorName
+                                )
+
+                                if (reason.key == "reply" && post != null) {
+                                    PostComponent(
+                                        post,
+                                        navigator,
+                                        density = PostDensity.Regular,
+                                        showActions = true,
+                                        showReply = true,
+                                        showLabels = false,
+                                        showSeparator = false,
+                                        modifier = if (item.isRead) {
+                                            Modifier
+                                        } else {
+                                            Modifier.background(
+                                                MaterialTheme.colorScheme.primaryContainer.copy(
+                                                    0.15f
+                                                )
+                                            )
+                                        }
                                     ) {
-                                        item.notifications.take(5).forEach { notification ->
+                                        navigator.navigate(FullsizePostDestination(post.uri.atUri))
+                                    }
+                                } else {
+
+                                    NotificationStack(
+                                        reasonKey = reason.key,
+                                        reasonLabel = reason.label,
+                                        modifier = modifier,
+                                        avatarContent = {
                                             Avatar(
-                                                avatarUrl = notification.author.avatar?.uri,
-                                                contentDescription = notification.author.displayName
-                                                    ?: notification.author.handle.handle,
+                                                avatarUrl = item.notification.author.avatar?.uri,
+                                                contentDescription = item.notification.author.displayName
+                                                    ?: item.notification.author.handle.handle,
                                                 modifier = Modifier
                                                     .size(34.dp)
                                                     .clickable {
                                                         navigator.navigate(
                                                             ProfileDestination(
-                                                                notification.author.did.did
+                                                                item.notification.author.did.did
                                                             )
                                                         )
                                                     }
                                             )
-                                        }
-                                        if (item.notifications.size > 5) {
-                                            Text(
-                                                "+${item.notifications.size - 5}",
-                                                style = MaterialTheme.typography.bodySmall.copy(
-                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                                ),
-                                                modifier = Modifier.padding(4.dp)
-                                            )
-                                        }
-                                    }
-                                },
-                                message = message,
-                                snippetContent = snippetContent
-                            )
-                        }
-                        is NotificationItem.Single -> {
-                            val reason = reasonInfo(item.notification.reason)
-                            val authorName = item.notification.author.displayName
-                                ?: item.notification.author.handle.handle
-                            val message = notificationMessage(
-                                reasonKey = reason.key,
-                                reasonLabel = reason.label,
-                                names = authorName
-                            )
-                            NotificationStack(
-                                reasonKey = reason.key,
-                                reasonLabel = reason.label,
-                                modifier = Modifier.padding(horizontal = 14.dp),
-                                avatarContent = {
-                                    Avatar(
-                                        avatarUrl = item.notification.author.avatar?.uri,
-                                        contentDescription = item.notification.author.displayName
-                                            ?: item.notification.author.handle.handle,
-                                        modifier = Modifier
-                                            .size(34.dp)
-                                            .clickable {
-                                                navigator.navigate(
-                                                    ProfileDestination(
-                                                        item.notification.author.did.did
-                                                    )
-                                                )
-                                            }
+                                        },
+                                        message = message,
+                                        snippetContent = snippetContent
                                     )
-                                },
-                                message = message,
-                                snippetContent = snippetContent
-                            )
+                                }
+                            }
                         }
+
+                        HorizontalDivider(
+                            modifier = Modifier
+                                .fillMaxWidth(),
+                            thickness = 0.2.dp
+                        )
                     }
 
-                    HorizontalDivider(
-                        modifier = Modifier
-                            .fillMaxWidth(),
-                        thickness = 0.15.dp
-                    )
+                    if (notifications.hasMore) {
+                        item {
+                            LoadMore(notifications.value?.size ?: 0) {
+                                coroutineScope.launch {
+                                    notifications.loadMore?.invoke()
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
+
+        val shouldShow by remember {
+            derivedStateOf {
+                listState.firstVisibleItemIndex > 0 ||
+                        listState.firstVisibleItemScrollOffset > 150
+            }
+        }
+
+        val alpha by animateFloatAsState(
+            targetValue = if (shouldShow) 1f else 0f,
+            label = "topBarAlpha",
+            animationSpec = tween(300)
+        )
+
+        Box(
+            modifier = Modifier
+                .alpha(alpha)
+                .fillMaxWidth()
+                .height(200.dp)
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(
+                            MaterialTheme.colorScheme.surface.copy(alpha = 1f),
+                            MaterialTheme.colorScheme.surface.copy(alpha = 1f),
+                            Color.Transparent
+                        )
+                    )
+                )
+                .zIndex(1f)
+        )
     }
 }
 
@@ -264,9 +449,16 @@ sealed class NotificationItem {
         val reasonKey: String,
         val reasonLabel: String,
         val subject: AtUri,
-        val notifications: List<ListNotificationsNotification>
+        val notifications: List<ListNotificationsNotification>,
     ) : NotificationItem()
+
     data class Single(val notification: ListNotificationsNotification) : NotificationItem()
+
+    val isRead: Boolean
+        get() = when (this) {
+            is GroupedPostActivity -> notifications.all { it.isRead }
+            is Single -> notification.isRead
+        }
 }
 
 private val groupedReasons = setOf("like", "repost")
@@ -306,7 +498,7 @@ fun buildNotificationItems(
                         reasonKey = reason.key,
                         reasonLabel = reason.label,
                         subject = subject!!,
-                        notifications = list
+                        notifications = list,
                     )
                 )
             }
@@ -427,7 +619,7 @@ private fun NotificationIcon(reasonKey: String, reasonLabel: String) {
 }
 
 @Composable
-private fun PostSnippet(post: PostView, onClick: () -> Unit) {
+private fun PostSnippet(post: PostView) {
     val text = postTextForSnippet(post)
     val snippet = if (text.isNullOrBlank()) "Post content unavailable" else text
     Text(
@@ -437,8 +629,6 @@ private fun PostSnippet(post: PostView, onClick: () -> Unit) {
         ),
         maxLines = 3,
         overflow = TextOverflow.Ellipsis,
-        modifier = Modifier
-            .clickable { onClick() }
     )
 }
 
@@ -453,5 +643,5 @@ private fun postTextForSnippet(post: PostView): String? {
 
 fun List<ListNotificationsNotification>.takeAsString(n: Int): String {
     return take(n).joinToString(", ") { it.author.displayName ?: it.author.handle.handle } +
-            if(size > n) " and ${size - n} others" else ""
+            if (size > n) " and ${size - n} others" else ""
 }

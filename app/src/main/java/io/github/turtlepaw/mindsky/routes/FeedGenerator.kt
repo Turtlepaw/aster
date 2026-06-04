@@ -12,7 +12,9 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
+import kotlinx.coroutines.launch
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
@@ -43,6 +45,7 @@ import sh.christian.ozone.api.AtUri
 fun FeedGenerator(navigator: DestinationsNavigator, feed: AtUri) {
     val api = LocalMindskyApi.current
     val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
     val content = InfiniteCache<FeedViewPost>(
         fetcher = {
             val response = api.getFeed(
@@ -135,6 +138,15 @@ fun FeedGenerator(navigator: DestinationsNavigator, feed: AtUri) {
                         density = PostDensity.Regular,
                     ){
                         navigator.navigate(FullsizePostDestination(it.post.uri.atUri))
+                    }
+                }
+                if (content.hasMore) {
+                    item {
+                        LoadMore(content.value?.size ?: 0) {
+                            coroutineScope.launch {
+                                content.loadMore?.invoke()
+                            }
+                        }
                     }
                 }
             }

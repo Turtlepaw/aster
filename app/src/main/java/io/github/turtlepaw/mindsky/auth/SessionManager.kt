@@ -24,14 +24,21 @@ class SessionManager(private val context: Context) {
     private val prefsName = "mindsky_prefs"
     private val keySession = "user_session"
     private val keyOAuthState = "oauth_state"
+    private val currentDidKey = "current_did"
+    private val allDidsKey = "all_dids"
     private val gson = Gson()
 
     private val _sessionFlow = MutableStateFlow<UserSession?>(null)
     val sessionFlow: StateFlow<UserSession?> = _sessionFlow.asStateFlow()
 
+    val currentDid get() = sessionFlow.value?.did
+
     init {
         generateSecretKeyIfNotExists()
-        _sessionFlow.value = getSession() // load saved session on startup
+        val currentDid = prefs.getString(currentDidKey, null)
+        if (currentDid != null) {
+            _sessionFlow.value = getSession(currentDid)
+        }
     }
 
     private fun generateSecretKeyIfNotExists() {
@@ -83,35 +90,93 @@ class SessionManager(private val context: Context) {
         return String(plainBytes, Charsets.UTF_8)
     }
 
+    fun UserSession.getPrefName(): String =
+        getPrefName(did)
+
+    fun getPrefName(did: String): String =
+        keySession + did
+
     fun saveSession(session: UserSession) {
         val json = gson.toJson(session)
         val encrypted = encrypt(json)
-        prefs.edit { putString(keySession, encrypted) }
+        
+        val dids = getLoggedInDids().toMutableSet()
+        dids.add(session.did)
+        saveLoggedInDids(dids.toList())
+        
+        prefs.edit { 
+            putString(session.getPrefName(), encrypted)
+            putString(currentDidKey, session.did)
+        }
         _sessionFlow.value = session
     }
 
-    fun getSession(): UserSession? {
-        val encrypted = prefs.getString(keySession, null) ?: return null
+    fun getSession(): UserSession? = getCurrentSession()
+
+    fun getCurrentSession(): UserSession? {
+        val currentDid = prefs.getString(currentDidKey, null)
+        return if (currentDid != null) {
+            getSession(currentDid)
+        } else {
+            null
+        }
+    }
+
+    fun getLoggedInDids(): List<String> {
+        val json = prefs.getString(allDidsKey, null) ?: return emptyList()
+        return gson.fromJson(json, Array<String>::class.java)?.toList() ?: emptyList()
+    }
+
+    private fun saveLoggedInDids(dids: List<String>) {
+        val json = gson.toJson(dids)
+        prefs.edit { putString(allDidsKey, json) }
+    }
+
+    fun getSessions(): List<UserSession> {
+        return getLoggedInDids().mapNotNull { getSession(it) }
+    }
+
+    fun switchAccount(did: String) {
+        val session = getSession(did) ?: return
+        prefs.edit { putString(currentDidKey, did) }
+        _sessionFlow.value = session
+    }
+
+    fun getSession(did: String): UserSession? {
+        val encrypted = prefs.getString(getPrefName(did), null) ?: return null
         return try {
             val decrypted = decrypt(encrypted)
             val session = gson.fromJson(decrypted, UserSession::class.java)
             if (session.pdsUrl.isBlank()) {
                 Log.w("SessionManager", "Stored session missing PDS URL; clearing.")
-                clearSession()
+                clearSession(did)
                 null
             } else {
                 session
             }
         } catch (e: Exception) {
             Log.w("SessionManager", "Failed to load session; clearing.", e)
-            clearSession()
+            clearSession(did)
             null
         }
     }
 
-    fun clearSession() {
-        prefs.edit { remove(keySession) }
-        _sessionFlow.value = null
+    fun clearSession(did: String) {
+        prefs.edit { remove(getPrefName(did)) }
+        
+        val dids = getLoggedInDids().toMutableList()
+        dids.remove(did)
+        saveLoggedInDids(dids)
+        
+        val currentDid = prefs.getString(currentDidKey, null)
+        if (currentDid == did) {
+            val nextDid = dids.firstOrNull()
+            prefs.edit { 
+                if (nextDid != null) putString(currentDidKey, nextDid)
+                else remove(currentDidKey)
+            }
+            _sessionFlow.value = nextDid?.let { getSession(it) }
+        }
     }
 
     fun saveOAuthState(oauthState: OAuthState) {
@@ -144,5 +209,6 @@ data class OAuthState(
     val state: String,
     val codeVerifier: String,
     val authServerUrl: String,
-    val handle: String? = null
+    val handle: String? = null,
+    val did: String? = null
 )

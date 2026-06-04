@@ -5,49 +5,31 @@ import android.util.Log
 import androidx.compose.runtime.*
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.serialization.KSerializer
-import kotlinx.serialization.builtins.MapSerializer
-import kotlinx.serialization.builtins.serializer
-import kotlinx.serialization.json.Json.Default.encodeToString
 import java.io.File
 import androidx.compose.ui.platform.LocalContext
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.Json.Default.decodeFromString
-import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
 
-
-data class SingleCacheLoadResult<V>(
-    val value: Map<String, V>,
+data class SingleLoadResult<V>(
+    val value: V?,
     val isLoading: Boolean,
+    val refresh: (suspend () -> Unit)?,
     val error: Throwable?
 )
 
 /**
- * Holds and persists a large amount of values while fetching in background.
+ * Holds and persists a single value while fetching in background.
  */
 class SingleCache<V>(
-    private val fetcher: suspend () -> Map<String, V>,
+    private val fetcher: suspend () -> V,
     private val serializer: KSerializer<V>,
     private val identifier: String,
 ) {
-    companion object {
-        @Composable
-        fun <V> rememberLoad(
-            fetcher: suspend () -> Map<String, V>,
-            serializer: KSerializer<V>,
-            identifier: String,
-        ): SingleCacheLoadResult<V> {
-            val cache = remember { SingleCache(fetcher, serializer, identifier) }
-            return cache.load()
-        }
-    }
-    var memory = mutableMapOf<String, V>()
+    private var memory: V? = null
     private val mutex = Mutex()
 
     private val json = Json {
@@ -55,48 +37,73 @@ class SingleCache<V>(
         classDiscriminator = "\$type"
     }
 
-    private fun readDisk(context: Context): Map<String, V>? {
+    companion object {
+        @Composable
+        fun <V> rememberLoad(
+            fetcher: suspend () -> V,
+            serializer: KSerializer<V>,
+            identifier: String,
+        ): SingleLoadResult<V> {
+            val cache = remember { SingleCache(fetcher, serializer, identifier) }
+            return cache.load()
+        }
+    }
+
+    private fun readDisk(context: Context): V? {
         val file = File(context.cacheDir, getIdentifier())
         if (!file.exists()) return null
 
-
-        val mapSerializer =
-            MapSerializer(String.serializer(), serializer)
-
-        return json.decodeFromString(mapSerializer, file.readText())
+        return try {
+            json.decodeFromString(serializer, file.readText())
+        } catch (e: Exception) {
+            Log.e("SingleCache", "Error reading disk for $identifier", e)
+            null
+        }
     }
 
     fun getIdentifier() = identifier.hashCode().toString() + ".json"
 
-    private fun writeDisk(context: Context) {
+    private fun writeDisk(context: Context, value: V) {
         val file = File(context.cacheDir, getIdentifier())
         file.parentFile?.mkdirs()
-        val mapSerializer =
-            MapSerializer(String.serializer(), serializer)
-
-
-        file.writeText(
-            json.encodeToString(mapSerializer, memory)
-        )
+        file.writeText(json.encodeToString(serializer, value))
     }
 
     @Composable
-    fun load(): SingleCacheLoadResult<V> {
+    fun load(): SingleLoadResult<V> {
         val context = LocalContext.current
 
-        var value by remember { mutableStateOf<Map<String, V>>(emptyMap()) }
-        var isLoading by remember { mutableStateOf(true) }
+        var value by remember { mutableStateOf<V?>(memory) }
+        var isLoading by remember { mutableStateOf(memory == null) }
         var error by remember { mutableStateOf<Throwable?>(null) }
+
+        val refresh: suspend () -> Unit = {
+            isLoading = true
+            try {
+                mutex.withLock {
+                    val fresh = fetcher()
+                    memory = fresh
+                    value = fresh
+                    writeDisk(context, fresh)
+                }
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                Log.e("SingleCache", "Error refreshing $identifier", e)
+                error = e
+            } finally {
+                isLoading = false
+            }
+        }
 
         LaunchedEffect(identifier) {
             // Memory first
-            if (memory.isNotEmpty()) {
-                value = memory.toMap()
+            if (memory != null) {
+                value = memory
                 isLoading = false
             } else {
                 // Disk second
                 readDisk(context)?.let {
-                    memory.putAll(it)
+                    memory = it
                     value = it
                     isLoading = false
                 }
@@ -107,23 +114,29 @@ class SingleCache<V>(
             try {
                 mutex.withLock {
                     val fresh = fetcher()
-                    memory.clear()
-                    memory.putAll(fresh)
-
-                    value = memory.toMap()
-                    writeDisk(context)
+                    memory = fresh
+                    value = fresh
+                    writeDisk(context, fresh)
                 }
             } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                Log.e("SingleCache", "Error fetching $identifier", e)
                 error = e
+                isLoading = false
                 // try again in 15s
                 delay(15.seconds)
                 this.launch {
-                    mutex.withLock {
-                        val fresh = fetcher()
-                        memory.clear()
-                        memory.putAll(fresh)
-                        value = memory.toMap()
-                        writeDisk(context)
+                    try {
+                        mutex.withLock {
+                            val fresh = fetcher()
+                            memory = fresh
+                            value = fresh
+                            writeDisk(context, fresh)
+                        }
+                    } catch (e: Exception) {
+                        if (e is CancellationException) throw e
+                        Log.e("SingleCache", "Error on retry for $identifier", e)
+                        error = e
                     }
                 }
             } finally {
@@ -131,9 +144,10 @@ class SingleCache<V>(
             }
         }
 
-        return SingleCacheLoadResult(
+        return SingleLoadResult(
             value = value,
             isLoading = isLoading,
+            refresh = refresh,
             error = error
         )
     }

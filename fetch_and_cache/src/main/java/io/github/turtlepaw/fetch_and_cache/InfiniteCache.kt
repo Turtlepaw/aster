@@ -1,7 +1,9 @@
 package io.github.turtlepaw.fetch_and_cache
 
 import android.content.Context
+import android.util.Log
 import androidx.compose.runtime.*
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
@@ -15,7 +17,9 @@ import kotlinx.serialization.builtins.ListSerializer
 data class InfiniteLoadResult<V>(
     val value: List<V>?,
     val loadMore: (suspend () -> Unit)?,
+    val refresh: (suspend () -> Unit)?,
     val isLoading: Boolean,
+    val hasMore: Boolean = true,
     val error: String?
 )
 
@@ -31,13 +35,18 @@ class InfiniteCache<V>(
     private val identifier: String,
     context: Context
 ) {
-    private val json = Json {
-        ignoreUnknownKeys = true
-        classDiscriminator = "\$type"
-    }
     var memory = mutableListOf<V>()
     val mutex = Mutex()
     val cursor = mutableStateOf<String?>(null)
+
+    private val json: Json get() = defaultJson
+
+    companion object {
+        private val defaultJson = Json {
+            ignoreUnknownKeys = true
+            classDiscriminator = "\$type"
+        }
+    }
 
     init {
         val file = File(context.cacheDir, identifier)
@@ -81,6 +90,7 @@ class InfiniteCache<V>(
                 persistResult(context)
             }
         } catch (e: Exception) {
+            if (e is CancellationException) throw e
             error = e.message
         }
         isLoading = false
@@ -88,33 +98,67 @@ class InfiniteCache<V>(
         return InfiniteLoadResult(
             value = value,
             isLoading = isLoading,
+            hasMore = cursor.value != null,
             loadMore = {
                 loadAsync(context)
+            },
+            refresh = {
+                refreshAsync(context)
+            },
+            error = error
+        )
+    }
+
+    suspend fun refreshAsync(context: Context): InfiniteLoadResult<V> {
+        var value: MutableList<V>? = null
+        var isLoading = true
+        var error: String? = null
+
+        try {
+            val result = fetcher(null)
+            cursor.value = result.first
+            value = result.second.toMutableList()
+
+            mutex.withLock {
+                memory = value
+                persistResult(context)
+            }
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            error = e.message
+        }
+        isLoading = false
+
+        return InfiniteLoadResult(
+            value = value,
+            isLoading = isLoading,
+            hasMore = cursor.value != null,
+            loadMore = {
+                loadAsync(context)
+            },
+            refresh = {
+                refreshAsync(context)
             },
             error = error
         )
     }
 
     @Composable
-    fun load(): InfiniteLoadResult<V> {
-        var value: List<V>? by remember { mutableStateOf(memory.toList()) }
-        var isLoading by remember { mutableStateOf(value.isNullOrEmpty()) }
+    fun load(defaultIsLoading: Boolean? = null): InfiniteLoadResult<V> {
+        var value: List<V>? by remember(memory) { mutableStateOf(memory.toList()) }
+        var isLoading by remember { mutableStateOf(defaultIsLoading ?: value.isNullOrEmpty()) }
+        var hasMore by remember { mutableStateOf(cursor.value != null || value.isNullOrEmpty()) }
         var error by remember { mutableStateOf<String?>(null) }
         val context = LocalContext.current
 
-        LaunchedEffect(Unit) {
+        val refresh: suspend () -> Unit = {
+            isLoading = true
             try {
-                val previousCursor = cursor.value
-                val result = fetcher(previousCursor)
+                val result = fetcher(null)
                 cursor.value = result.first
+                hasMore = result.first != null
 
-                val updated =
-                    if (previousCursor == null)
-                        result.second
-                    else if (value.isNullOrEmpty())
-                        result.second
-                    else
-                        value!! + result.second
+                val updated = result.second
                 value = updated
 
                 mutex.withLock {
@@ -122,7 +166,51 @@ class InfiniteCache<V>(
                     persistResult(context)
                 }
             } catch (e: Exception) {
+                if (e is CancellationException) throw e
                 error = e.message
+            }
+            isLoading = false
+        }
+
+        val loadMore: suspend () -> Unit = {
+            isLoading = true
+            try {
+                val previousCursor = cursor.value
+                val result = fetcher(previousCursor)
+                cursor.value = result.first
+                hasMore = result.first != null
+
+                val updated = (value ?: emptyList()) + result.second
+                value = updated
+
+                mutex.withLock {
+                    memory = updated.toMutableList()
+                    persistResult(context)
+                }
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                error = e.message
+            }
+            isLoading = false
+        }
+
+        LaunchedEffect(Unit) {
+            try {
+                val result = fetcher(null)
+                cursor.value = result.first
+                hasMore = result.first != null
+
+                val updated = result.second
+                value = updated
+
+                mutex.withLock {
+                    memory = updated.toMutableList()
+                    persistResult(context)
+                }
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                error = e.message
+                Log.e("InfiniteCache", "Error fetching $identifier", e)
             }
             isLoading = false
         }
@@ -130,9 +218,9 @@ class InfiniteCache<V>(
         return InfiniteLoadResult(
             value = value,
             isLoading = isLoading,
-            loadMore = {
-                loadAsync(context)
-            },
+            hasMore = hasMore,
+            loadMore = loadMore,
+            refresh = refresh,
             error = error
         )
     }

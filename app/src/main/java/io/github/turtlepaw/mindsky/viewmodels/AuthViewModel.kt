@@ -11,6 +11,7 @@ import androidx.core.net.toUri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
+import io.github.turtlepaw.mindsky.MindskyApplication
 import io.github.turtlepaw.mindsky.auth.AuthState
 import io.github.turtlepaw.mindsky.auth.OAuthClient
 import io.github.turtlepaw.mindsky.auth.SessionManager
@@ -94,6 +95,7 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
             try {
                 val session = oauthClient.handleCallback(code, state)
                 Log.d(TAG, "Successfully authenticated as ${session.handle}")
+                getApplication<MindskyApplication>().configureAuthenticatedApi(session)
                 _authState.value = AuthState.Authenticated(session)
             } catch (e: Exception) {
                 Log.e(TAG, "OAuth callback failed", e)
@@ -116,6 +118,7 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             try {
                 val newSession = oauthClient.refreshToken(currentState.session)
+                getApplication<MindskyApplication>().configureAuthenticatedApi(newSession)
                 _authState.value = AuthState.Authenticated(newSession)
             } catch (e: Exception) {
                 Log.e(TAG, "Session refresh failed", e)
@@ -124,11 +127,27 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun signOut() {
+    fun signOut(did: String? = null) {
         viewModelScope.launch {
-            sessionManager.clearSession()
-            _authState.value = AuthState.Unauthenticated
-            Log.d(TAG, "User signed out")
+            val targetDid = did ?: sessionManager.currentDid
+            if (targetDid != null) {
+                sessionManager.clearSession(targetDid)
+                Log.d(TAG, "User signed out: $targetDid")
+                if (sessionManager.currentDid == null) {
+                    _authState.value = AuthState.Unauthenticated
+                }
+            }
+        }
+    }
+
+    fun switchAccount(did: String) {
+        viewModelScope.launch {
+            sessionManager.switchAccount(did)
+            val newSession = sessionManager.getSession(did)
+            if (newSession != null) {
+                getApplication<MindskyApplication>().configureAuthenticatedApi(newSession)
+                _authState.value = AuthState.Authenticated(newSession)
+            }
         }
     }
 }

@@ -127,11 +127,13 @@ class DPoPManager private constructor(context: Context) {
         }
 
         val now = System.currentTimeMillis() / 1000
+        val cleanUrl = stripQueryAndFragment(url)
+        Log.v("DPoPManager", "Generating proof for $method $cleanUrl")
 
         val payload = JSONObject().apply {
             put("jti", UUID.randomUUID().toString())
             put("htm", method.uppercase())
-            put("htu", stripQueryAndFragment(url))
+            put("htu", cleanUrl)
             put("iat", now)
 
             if (nonce != null) {
@@ -150,7 +152,8 @@ class DPoPManager private constructor(context: Context) {
         }
 
         val headerEncoded = base64UrlEncode(header.toString().toByteArray(Charsets.UTF_8))
-        val payloadEncoded = base64UrlEncode(payload.toString().toByteArray(Charsets.UTF_8))
+        val payloadString = payload.toString().replace("\\/", "/")
+        val payloadEncoded = base64UrlEncode(payloadString.toByteArray(Charsets.UTF_8))
         val signatureInput = "$headerEncoded.$payloadEncoded"
 
         val signature = Signature.getInstance("SHA256withECDSA").apply {

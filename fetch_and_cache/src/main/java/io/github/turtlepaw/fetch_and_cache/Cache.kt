@@ -9,6 +9,7 @@ import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.json.Json.Default.encodeToString
 import java.io.File
 import androidx.compose.ui.platform.LocalContext
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.Json.Default.decodeFromString
 
@@ -49,6 +50,7 @@ class Cache<K, V>(
                 persistResult(context)
             }
         } catch (e: Exception) {
+            if (e is CancellationException) throw e
             error = e.message
         }
         isLoading = false
@@ -73,6 +75,7 @@ class Cache<K, V>(
                 memory[key.toString()] = value!!
                 persistResult(context)
             } catch (e: Exception) {
+                if (e is CancellationException) throw e
                 error = e.message
             }
             isLoading = false

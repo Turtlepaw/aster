@@ -6,7 +6,7 @@ import io.github.turtlepaw.mindsky.auth.SessionManager
 import io.github.turtlepaw.mindsky.auth.UserSession
 import io.github.turtlepaw.mindsky.db.ObjectBox
 import io.objectbox.BoxStore
-import sh.christian.ozone.api.AuthenticatedXrpcBlueskyApi
+import sh.christian.ozone.BlueskyApi
 
 object WorkerCommon {
     const val API_REQUEST_LIMIT = 100L // Standard API limit for pagination
@@ -20,7 +20,7 @@ object WorkerCommon {
         return sessionManager.getSession()
     }
 
-    fun getBlueskyApi(appContext: Context): AuthenticatedXrpcBlueskyApi {
+    fun getBlueskyApi(appContext: Context): BlueskyApi {
         return (appContext.applicationContext as io.github.turtlepaw.mindsky.MindskyApplication).blueskyApi
     }
 

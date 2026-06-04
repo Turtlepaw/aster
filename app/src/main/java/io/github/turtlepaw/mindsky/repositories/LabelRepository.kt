@@ -7,11 +7,11 @@ import com.atproto.label.Label
 import com.atproto.label.LabelValueDefinition
 import io.github.turtlepaw.mindsky.cache.LabelerCache
 import io.github.turtlepaw.mindsky.cache.LabelerDefCache
-import sh.christian.ozone.api.AuthenticatedXrpcBlueskyApi
+import sh.christian.ozone.BlueskyApi
 
 class LabelRepository(
     private val context: Context,
-    private val blueskyApi: AuthenticatedXrpcBlueskyApi,
+    private val blueskyApi: BlueskyApi,
     private val labelerCache: LabelerCache
 ) {
     private val labelerDefCache = LabelerDefCache(context)

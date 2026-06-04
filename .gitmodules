@@ -1,3 +1,6 @@
 [submodule "vendor/atproto"]
 	path = vendor/atproto
 	url = https://github.com/bluesky-social/atproto.git
+[submodule "ozone"]
+	path = ozone
+	url = https://github.com/Turtlepaw/ozone.git

@@ -85,12 +85,12 @@ fun ProfileExpanded(actor: ProfileView, onClick: () -> Unit) {
                     )
                 }
             }
-            Labelers(actor.labels)
+            //Labelers(actor.labels)
             if (!actor.description.isNullOrEmpty()) {
                 Text(
                     actor.description!!,
-                    style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier.heightIn(max = 100.dp),
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.heightIn(max = 70.dp),
                     overflow = TextOverflow.Ellipsis
                 )
             }

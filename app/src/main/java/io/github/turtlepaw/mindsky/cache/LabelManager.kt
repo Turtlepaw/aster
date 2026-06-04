@@ -4,7 +4,7 @@ import android.content.Context
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import sh.christian.ozone.api.AuthenticatedXrpcBlueskyApi
+import sh.christian.ozone.BlueskyApi
 
 class LabelManager(context: Context) {
     private val coroutineScope = CoroutineScope(Dispatchers.IO)
@@ -14,7 +14,7 @@ class LabelManager(context: Context) {
     val labelersFlow = labelerCache.labelersFlow
     val labelersDefinitionFlow = labelerDefinitionsCache.definitionsFlow
 
-    suspend fun preWarmDefinitions(blueskyApi: AuthenticatedXrpcBlueskyApi) {
+    suspend fun preWarmDefinitions(blueskyApi: BlueskyApi) {
         coroutineScope.launch {
             labelersFlow.collect {
                 labelerDefinitionsCache.getDefinitions(
@@ -25,7 +25,7 @@ class LabelManager(context: Context) {
         }
     }
 
-    suspend fun revalidateLabelers(blueskyApi: AuthenticatedXrpcBlueskyApi) {
+    suspend fun revalidateLabelers(blueskyApi: BlueskyApi) {
         labelerCache.fetchAndCacheLabelers(blueskyApi)
     }
 }

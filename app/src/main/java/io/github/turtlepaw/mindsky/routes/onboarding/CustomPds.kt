@@ -30,6 +30,8 @@ import com.ramcosta.composedestinations.annotation.RootGraph
 import com.ramcosta.composedestinations.generated.destinations.LoginDestination
 import com.ramcosta.composedestinations.navigation.DestinationsNavigator
 import io.github.turtlepaw.mindsky.R
+import io.github.turtlepaw.mindsky.auth.getPdsUrlFromDid
+import io.github.turtlepaw.mindsky.auth.resolveHandleToDid
 import io.github.turtlepaw.mindsky.routes.settings.TopAppBarCommon
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.okhttp.OkHttp
@@ -52,18 +54,18 @@ enum class ConnectionState {
 
 @Destination<RootGraph>
 @Composable
-fun CustomPds(navigator: DestinationsNavigator) {
+fun CustomPds(navigator: DestinationsNavigator, isOnboarding: Boolean = true) {
     val viewModel = rememberOnboardingViewModel()
 
-    var pdsUrl by remember { mutableStateOf("") }
+    var input by remember { mutableStateOf("") }
     var isConnected by remember { mutableStateOf(ConnectionState.Idle) }
 
     val coroutineScope = rememberCoroutineScope()
     var debounceJob by remember { mutableStateOf<Job?>(null) }
 
-    LaunchedEffect(pdsUrl) {
+    LaunchedEffect(input) {
         debounceJob?.cancel()
-        if (pdsUrl.isBlank()) {
+        if (input.isBlank()) {
             isConnected = ConnectionState.Idle
             return@LaunchedEffect
         }
@@ -71,6 +73,20 @@ fun CustomPds(navigator: DestinationsNavigator) {
             // Debounce delay: 500ms after user stops typing
             kotlinx.coroutines.delay(500L)
             isConnected = ConnectionState.Connecting
+            try {
+                val did = if(input.startsWith("did:")) input
+                    else resolveHandleToDid(input)
+
+                val pds = getPdsUrlFromDid(did)
+                viewModel.pds = pds
+                viewModel.handle = did
+                Log.d("CustomPds", "Connected to server: $pds")
+                isConnected = ConnectionState.Connected
+                return@launch
+            } catch (e: Exception) {
+                Log.e("CustomPds", "Failed to resolve handle to DID: $input. Details: ${e.message}", e)
+            }
+
             try {
                 val httpClient = HttpClient(OkHttp) {
                     install(Logging) {
@@ -83,10 +99,10 @@ fun CustomPds(navigator: DestinationsNavigator) {
                     }
                     defaultRequest {
                         url.takeFrom(
-                            if(pdsUrl.startsWith("http://") || pdsUrl.startsWith("https://")) {
-                                pdsUrl
+                            if(input.startsWith("http://") || input.startsWith("https://")) {
+                                input
                             } else {
-                                "https://$pdsUrl"
+                                "https://$input"
                             }
                         )
                     }
@@ -96,26 +112,28 @@ fun CustomPds(navigator: DestinationsNavigator) {
                 val api = XrpcBlueskyApi(httpClient)
                 val server = api.describeServer()
                 Log.d("CustomPds", "Connected to server: ${server}")
+                viewModel.pds = input
                 isConnected = ConnectionState.Connected
+                return@launch
             } catch (e: UnknownServiceException) {
                 isConnected = ConnectionState.Failed
                 if (e.message?.contains("CLEARTEXT") == true &&
-                    (pdsUrl.startsWith("http://localhost") || pdsUrl.startsWith("http://127.0.0.1"))
+                    (input.startsWith("http://localhost") || input.startsWith("http://127.0.0.1"))
                 ) {
                     Log.w(
                         "CustomPds",
-                        "CLEARTEXT communication to localhost is not permitted. PDS: $pdsUrl. Details: ${e.message}"
+                        "CLEARTEXT communication to localhost is not permitted. PDS: $input. Details: ${e.message}"
                     )
                 } else {
                     Log.e(
                         "CustomPds",
-                        "Unknown service error connecting to PDS: $pdsUrl. Details: ${e.message}",
+                        "Unknown service error connecting to PDS: $input. Details: ${e.message}",
                         e
                     )
                 }
             } catch (e: Exception) {
                 isConnected = ConnectionState.Failed
-                Log.e("CustomPds", "Failed to connect to PDS: $pdsUrl. Details: ${e.message}", e)
+                Log.e("CustomPds", "Failed to connect to PDS: $input. Details: ${e.message}", e)
             }
         }
     }
@@ -125,7 +143,7 @@ fun CustomPds(navigator: DestinationsNavigator) {
         topBar = {
             TopAppBarCommon.withBack(
                 navigator,
-                R.string.custom_pds,
+                R.string.login_with_handle,
                 MaterialTheme.typography.titleMedium
             )
         }
@@ -146,12 +164,12 @@ fun CustomPds(navigator: DestinationsNavigator) {
                             .padding(horizontal = 16.dp, vertical = 8.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
+//                        Text(
+//                            text = "Enter your handle",
+//                            style = MaterialTheme.typography.titleLarge
+//                        )
                         Text(
-                            text = "Enter your custom PDS URL",
-                            style = MaterialTheme.typography.titleLarge
-                        )
-                        Text(
-                            text = "This is the URL of the server you want to use for your account.",
+                            text = "You can enter your handle, DID, or the URL of your PDS to login.",
                             style = MaterialTheme.typography.bodyMedium,
                             modifier = Modifier.padding(bottom = 8.dp)
                         )
@@ -159,10 +177,10 @@ fun CustomPds(navigator: DestinationsNavigator) {
                 }
                 item {
                     OutlinedTextField(
-                        value = pdsUrl,
-                        onValueChange = { pdsUrl = it.trim() },
-                        label = { Text("Custom PDS URL") },
-                        placeholder = { Text("https://your.pds.url") },
+                        value = input,
+                        onValueChange = { input = it.trim() },
+                        label = { Text("Identifier") },
+                        placeholder = { Text("example.com") },
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                         modifier = Modifier
@@ -180,13 +198,8 @@ fun CustomPds(navigator: DestinationsNavigator) {
                 onClick = {
                     when (isConnected) {
                         ConnectionState.Connected -> {
-                            viewModel.pds = if (pdsUrl.startsWith("http://") || pdsUrl.startsWith("https://")) {
-                                pdsUrl
-                            } else {
-                                "https://$pdsUrl"
-                            }
                             navigator.navigate(
-                                LoginDestination(viewModel.pds)
+                                LoginDestination(viewModel.pds, isOnboarding)
                             )
                         }
 

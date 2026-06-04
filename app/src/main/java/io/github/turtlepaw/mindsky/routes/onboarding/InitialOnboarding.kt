@@ -14,6 +14,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -21,13 +24,26 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.ramcosta.composedestinations.annotation.Destination
 import com.ramcosta.composedestinations.annotation.RootGraph
+import com.ramcosta.composedestinations.generated.destinations.FeedDestination
 import com.ramcosta.composedestinations.generated.destinations.PdsListDestination
 import com.ramcosta.composedestinations.navigation.DestinationsNavigator
+import io.github.turtlepaw.mindsky.auth.AuthState
 import io.github.turtlepaw.mindsky.components.BouncingStar
+import io.github.turtlepaw.mindsky.replaceCurrent
+import io.github.turtlepaw.mindsky.viewmodels.rememberAuthViewModel
 
 @Destination<RootGraph>
 @Composable
 fun InitialOnboarding(navigator: DestinationsNavigator) {
+    val authViewModel = rememberAuthViewModel()
+    val authState by authViewModel.authState.collectAsState()
+
+    LaunchedEffect(authState) {
+        if (authState is AuthState.Authenticated) {
+            navigator.replaceCurrent(FeedDestination)
+        }
+    }
+    
     Scaffold { paddingValues ->
         Box(
             modifier = Modifier
@@ -82,7 +98,7 @@ fun InitialOnboarding(navigator: DestinationsNavigator) {
                     contentAlignment = Alignment.CenterEnd
                 ) {
                     Button(onClick = {
-                        navigator.navigate(PdsListDestination)
+                        navigator.navigate(PdsListDestination())
                     }) {
                         Text("Get Started")
                     }

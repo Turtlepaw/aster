@@ -1,23 +1,32 @@
 package io.github.turtlepaw.mindsky.utils
 
-import kotlinx.datetime.Clock
-import kotlinx.datetime.Instant
-import kotlinx.datetime.TimeZone
-import kotlinx.datetime.periodUntil
+import java.time.ZoneId
+import java.time.temporal.ChronoUnit
+import kotlin.time.Clock
+import kotlin.time.Instant
+import kotlin.time.toJavaInstant
 
 fun Instant.toRelativeTimeString(
     clock: Clock = Clock.System,
-    timeZone: TimeZone = TimeZone.currentSystemDefault()
+    zoneId: ZoneId = ZoneId.systemDefault()
 ): String {
-    val now = clock.now()
-    val period = this.periodUntil(now, timeZone)
+    val now = clock.now().toJavaInstant().atZone(zoneId)
+    val then = this.toJavaInstant().atZone(zoneId)
 
-    return when {
-        period.years > 0 -> "${period.years}y"
-        period.months > 0 -> "${period.months}mo"
-        period.days > 0 -> "${period.days}d"
-        period.hours > 0 -> "${period.hours}h"
-        period.minutes > 0 -> "${period.minutes}m"
-        else -> "now" // For periods less than a minute
-    }
+    val years = ChronoUnit.YEARS.between(then, now)
+    if (years > 0) return "${years}y"
+
+    val months = ChronoUnit.MONTHS.between(then, now)
+    if (months > 0) return "${months}mo"
+
+    val days = ChronoUnit.DAYS.between(then, now)
+    if (days > 0) return "${days}d"
+
+    val hours = ChronoUnit.HOURS.between(then, now)
+    if (hours > 0) return "${hours}h"
+
+    val minutes = ChronoUnit.MINUTES.between(then, now)
+    if (minutes > 0) return "${minutes}m"
+
+    return "now"
 }

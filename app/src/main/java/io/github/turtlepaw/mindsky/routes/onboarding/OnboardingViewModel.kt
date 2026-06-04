@@ -11,6 +11,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 
 class OnboardingViewModel : ViewModel() {
     var pds by mutableStateOf("")
+    var handle by mutableStateOf("")
 }
 
 @Composable

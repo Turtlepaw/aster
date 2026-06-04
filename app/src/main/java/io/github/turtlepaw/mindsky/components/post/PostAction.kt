@@ -23,6 +23,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
@@ -68,7 +69,7 @@ object PostAction {
 
     @Composable
     fun Button(
-        label: Float?,
+        label: Float? = null,
         icon: ImageVector,
         contentDescription: String,
         isHighlighted: Boolean = false,
@@ -104,7 +105,7 @@ object PostAction {
                 if (label != null && label > 0) {
                     Text(
                         text = Formatters.formatNumberForLocale(label.toInt()),
-                        style = MaterialTheme.typography.labelLarge.copy(
+                        style = (if(density == PostDensity.Expanded) MaterialTheme.typography.bodyLarge else MaterialTheme.typography.labelLarge).copy(
                             fontWeight = if (isHighlighted) FontWeight.SemiBold else FontWeight.Normal,
                             color = colour,
                         ),
@@ -139,28 +140,32 @@ object PostAction {
                 modifier = Modifier
                     .sizeIn()
                     .clip(CircleShape)
-                    .clickable(onClick = onClick)
-                    .padding(4.dp),
+                    .clickable(onClick = onClick),
                 contentAlignment = Alignment.Center
             ) {
 
                 Text(
                     text = buildAnnotatedString {
-                        append(
-                            AnnotatedString(
-                                Formatters.formatNumberForLocale(value.toInt()),
-                                spanStyle = SpanStyle(
-                                    fontWeight = FontWeight.SemiBold
-                                )
+                        withStyle(
+                            style = SpanStyle(
+                                fontWeight = FontWeight.SemiBold
                             )
-                        )
+                        ) {
+                            append(Formatters.formatNumberForLocale(value.toInt()))
+                        }
                         append(" ")
-                        append(
-                            label
-                        )
+                        withStyle(
+                            style = SpanStyle(
+                                fontWeight = FontWeight.Normal,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        ) {
+                            append(label)
+                        }
                     },
                     maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
+                    overflow = TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.labelLarge,
                 )
             }
         }

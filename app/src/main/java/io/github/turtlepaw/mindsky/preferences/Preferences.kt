@@ -36,5 +36,15 @@ object AppPrefs {
         defaultValue = 0
     )
 
-    val ALL = listOf(DarkTheme, ShowLabelerAvatars, UseCatppuccinTheme, CatppuccinVariant, CatppuccinAccent, DefaultFeed)
+    val BaseUrl = StringPreference(
+        key = "base_url",
+        defaultValue = "https://bsky.app"
+    )
+
+    val DeveloperMode = BooleanPreference(
+        key = "developer_mode",
+        defaultValue = false
+    )
+
+    val ALL = listOf(DarkTheme, ShowLabelerAvatars, UseCatppuccinTheme, CatppuccinVariant, CatppuccinAccent, DefaultFeed, DeveloperMode)
 }

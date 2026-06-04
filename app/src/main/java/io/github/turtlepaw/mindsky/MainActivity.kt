@@ -181,15 +181,11 @@ class MainActivity : ComponentActivity() {
         val sessionManager =
             SessionManager(applicationContext) // SessionManager can still be local if preferred
 
-        val startRoute = if (sessionManager.getSession() != null) {
-            FeedDestination
-        } else {
-            InitialOnboardingDestination
-        }
-
         setContent {
             val rememberedSessionManager = remember { sessionManager }
             val scrollToTopHandler = remember { mutableStateOf<(() -> Unit)?>(null) }
+            val navController = rememberNavController()
+            val postState = remember { PostsState() }
             val notifications = rememberPermissionState(
                 android.Manifest.permission.POST_NOTIFICATIONS
             )
@@ -203,28 +199,20 @@ class MainActivity : ComponentActivity() {
             }
 
             // Get API from MindskyApplication
-            val blueskyApi = mindskyApplication.blueskyApi
-
-            val profileCache = remember { ProfileCache(this@MainActivity) }
-            val profileRepository = remember { ProfileRepository(blueskyApi, profileCache) }
-            val viewModel: ProfileViewModel = viewModel(
-                factory = ProfileViewModelFactory(
-                    profileRepository,
-                    rememberedSessionManager
-                )
-            )
-            val feedViewModel: FeedViewModel =
-                viewModel(factory = FeedViewModelFactory(blueskyApi, this))
-            val navController = rememberNavController()
-            val postState = remember { PostsState() }
-
+            val blueskyApi by mindskyApplication.blueskyApiFlow.collectAsState()
+            val session by sessionManager.sessionFlow.collectAsState()
+            
+            val startRoute = remember {
+                if (session != null) {
+                    FeedDestination
+                } else {
+                    InitialOnboardingDestination
+                }
+            }
+            
             PreferenceProvider {
                 CompositionLocalProvider(
-                    LocalMindskyApi provides blueskyApi, // Use API from Application
                     LocalSessionManager provides rememberedSessionManager,
-                    LocalProfileModel provides viewModel,
-                    LocalProfileRepository provides profileRepository,
-                    LocalFeedModel provides feedViewModel,
                     LocalLabelManager provides mindskyApplication.labelManager,
                     LocalNavController provides navController,
                     LocalScrollToTop provides scrollToTopHandler,
@@ -235,22 +223,51 @@ class MainActivity : ComponentActivity() {
                             flow = LocalPreferences.current.getSharedPreferences()
                                 .getPreferenceFlow()
                         ) {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .background(MaterialTheme.colorScheme.background)
-                            ) {
-                                DestinationsNavHost(
-                                    navGraph = NavGraphs.root,
-                                    start = startRoute,
-                                    defaultTransitions = DefaultSlideFadeTransitions,
-                                    navController = navController
+                            if (blueskyApi == null) {
+                                // Show a loading screen while API is initializing
+                                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                    Text("Initializing API...")
+                                }
+                            } else {
+                                val profileCache = remember(blueskyApi) { ProfileCache(this@MainActivity) }
+                                val profileRepository = remember(blueskyApi) { ProfileRepository(blueskyApi!!, profileCache) }
+                                val viewModel: ProfileViewModel = viewModel(
+                                    key = "ProfileViewModel_${blueskyApi.hashCode()}",
+                                    factory = ProfileViewModelFactory(
+                                        profileRepository,
+                                        rememberedSessionManager
+                                    )
                                 )
+                                val feedViewModel: FeedViewModel =
+                                    viewModel(
+                                        key = blueskyApi.hashCode().toString(),
+                                        factory = FeedViewModelFactory(blueskyApi!!, this@MainActivity)
+                                    )
 
-                                BottomBar(
-                                    navController = navController,
-                                    modifier = Modifier.align(Alignment.BottomCenter)
-                                )
+                                CompositionLocalProvider(
+                                    LocalMindskyApi provides blueskyApi!!, // Use API from Application
+                                    LocalProfileModel provides viewModel,
+                                    LocalProfileRepository provides profileRepository,
+                                    LocalFeedModel provides feedViewModel,
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .background(MaterialTheme.colorScheme.background)
+                                    ) {
+                                        DestinationsNavHost(
+                                            navGraph = NavGraphs.root,
+                                            start = startRoute,
+                                            defaultTransitions = DefaultSlideFadeTransitions,
+                                            navController = navController
+                                        )
+
+                                        BottomBar(
+                                            navController = navController,
+                                            modifier = Modifier.align(Alignment.BottomCenter)
+                                        )
+                                    }
+                                }
                             }
                         }
                     }

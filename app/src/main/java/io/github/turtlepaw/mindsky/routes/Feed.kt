@@ -8,6 +8,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -94,6 +95,8 @@ import com.ramcosta.composedestinations.generated.destinations.MyProfileDestinat
 import com.ramcosta.composedestinations.generated.destinations.SettingsDestination
 import com.ramcosta.composedestinations.navigation.DestinationsNavigator
 import io.github.turtlepaw.fetch_and_cache.SingleCache
+import com.ramcosta.composedestinations.generated.destinations.PdsListDestination
+import io.github.turtlepaw.mindsky.components.AccountSwitcherSheet
 import io.github.turtlepaw.mindsky.R
 import io.github.turtlepaw.mindsky.components.Avatar
 import io.github.turtlepaw.mindsky.components.TopBarBackground
@@ -207,14 +210,24 @@ fun FeedWorkerProgressDisplay(feedWorkerInfo: WorkInfo?) {
 sealed class FeedItem {
     @Serializable
     data class FeedGenerator(val generator: GeneratorView) : FeedItem()
+
     @Serializable
     data class List(val list: ListView) : FeedItem()
 
+    @Serializable
+    data class Following(val target: String? = "") : FeedItem()
+
+    @Serializable
+    data object ForYou : FeedItem()
+
     companion object {
+        @Composable
         fun getName(feedItem: FeedItem): String {
             return when (feedItem) {
                 is FeedGenerator -> feedItem.generator.displayName
                 is List -> feedItem.list.name
+                is Following -> stringResource(R.string.following)
+                is ForYou -> "For You"
             }
         }
     }
@@ -261,9 +274,6 @@ fun Feed(nav: DestinationsNavigator) {
 
     LaunchedEffect(Unit) {
         selectedDestination = prefs.get(AppPrefs.DefaultFeed)
-        if(selectedDestination == 0){
-            viewModel.fetchFeed()
-        }
     }
 
     val workManager = WorkManager.getInstance(context)
@@ -277,79 +287,35 @@ fun Feed(nav: DestinationsNavigator) {
         workInfos?.firstOrNull { it.state == WorkInfo.State.RUNNING || it.state == WorkInfo.State.ENQUEUED }
     }
 
-    val userFeeds = SingleCache<FeedItem>(
-        fetcher = {
-            try {
-                val prefs = api.getPreferences().requireResponse()
-                val savedFeeds = prefs.preferences
-                    .filterIsInstance<PreferencesUnion.SavedFeedsPrefV2>()
-                    .first()
-                    .value.items
-                    .filter { it.pinned }
+    val feeds = viewModel.userFeeds.value
+    val safeSelectedDestination =
+        selectedDestination.coerceIn(0, (feeds.size - 1).coerceAtLeast(0))
 
-                val fetchable = savedFeeds.filter { it.value != "following" }
+    LaunchedEffect(Unit) {
+        viewModel.fetchUserFeeds()
+    }
 
-                val feedGenerators =
-                    fetchable.filter { it.value.contains("app.bsky.feed.generator") }
-                        .map { AtUri(it.value) }
-                val fetchedFeedGenerators = api.getFeedGenerators(
-                    GetFeedGeneratorsQueryParams(
-                        feeds = feedGenerators
-                    )
-                ).requireResponse().feeds.associateBy { it.uri.atUri }
+    LaunchedEffect(safeSelectedDestination, feeds.size) {
+        if (feeds.isEmpty()) return@LaunchedEffect
 
-                val lists = fetchable.filter { it.value.contains("app.bsky.graph.list") }
-                    .map { AtUri(it.value) }
-                val fetchedLists = lists.map {
-                    api.getList(
-                        GetListQueryParams(
-                            list = it,
-                            limit = 1
-                        )
-                    ).requireResponse().list
-                }
+        val isCorrectingOutOfBounds = selectedDestination != safeSelectedDestination
 
-                val ordered = LinkedHashMap<String, FeedItem>()
-                for (item in savedFeeds) {
-                    val feed = when {
-                        item.value.contains("app.bsky.feed.generator") -> {
-                            val item = fetchedFeedGenerators[item.value] ?: continue
-                            FeedItem.FeedGenerator(item)
-                        }
+        if (isCorrectingOutOfBounds) {
+            selectedDestination = safeSelectedDestination
+            prefs.set(AppPrefs.DefaultFeed, safeSelectedDestination)
+        }
 
-                        item.value.contains("app.bsky.graph.list") -> {
-                            val item =
-                                fetchedLists.firstOrNull { it.uri.atUri == item.value } ?: continue
-                            FeedItem.List(item)
-                        }
-
-                        else -> null
-                    }
-
-                    if (feed != null) {
-                        ordered[item.value] = feed
-                    }
-                }
-
-                ordered
-            } catch (e: Exception) {
-                Log.e("Feed", "Error fetching user feeds", e)
-                throw e
+        if (feeds.isNotEmpty()) {
+            val feedId = feeds[safeSelectedDestination].first
+            when (feeds[safeSelectedDestination].second) {
+                is FeedItem.Following, FeedItem.ForYou -> viewModel.fetchFeed()
+                is FeedItem.FeedGenerator, is FeedItem.List -> viewModel.fetchCustomFeed(
+                    AtUri(feedId),
+                    isRefresh = true
+                )
             }
-        },
-        identifier = "user_feeds",
-        serializer = FeedItem.serializer()
-    ).load()
-
-    val feeds = listOf(
-        FeedDestination.Following,
-        FeedDestination.ForYou
-    ) + (userFeeds.value?.map {
-        FeedDestination.UserFeed(
-            it.key,
-            FeedItem.getName(it.value)
-        )
-    } ?: emptyList())
+        }
+    }
 
     LaunchedEffect(Unit) {
         val files = listOf(
@@ -361,7 +327,8 @@ fun Feed(nav: DestinationsNavigator) {
         }
     }
 
-    Scaffold { paddingValues ->
+    Scaffold(
+    ) { paddingValues ->
         Box(
             modifier = Modifier
                 .padding(paddingValues)
@@ -432,82 +399,91 @@ fun Feed(nav: DestinationsNavigator) {
                             FeedWorkerProgressDisplay(feedWorkerInfo = feedWorkerInfo)
                         }
                     }
-                    item {
-                        PrimaryScrollableTabRow(
-                            selectedTabIndex = selectedDestination.coerceIn(0, (feeds.size - 1).coerceAtLeast(0)),
-                            edgePadding = 0.dp,
-                            modifier = Modifier.fillMaxWidth(),
-                        ) {
-                            feeds.forEachIndexed { index, destination ->
-                                Tab(
-                                    selected = selectedDestination == index,
-                                    onClick = {
-                                        if (selectedDestination != index) {
-                                            selectedDestination = index
-                                            prefs.set(AppPrefs.DefaultFeed, index)
+                    if (feeds.isNotEmpty()) {
+                        item {
+                            PrimaryScrollableTabRow(
+                                selectedTabIndex = safeSelectedDestination,
+                                edgePadding = 0.dp,
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                feeds.forEachIndexed { index, destination ->
+                                    Tab(
+                                        selected = safeSelectedDestination == index,
+                                        onClick = {
+                                            if (selectedDestination != index) {
+                                                selectedDestination = index
+                                                prefs.set(AppPrefs.DefaultFeed, index)
 
-                                            if (index < feeds.size) {
-                                                when (val dest = feeds[index]) {
-                                                    is FeedDestination.Following, FeedDestination.ForYou -> viewModel.fetchFeed()
-                                                    is FeedDestination.UserFeed -> viewModel.fetchCustomFeed(
-                                                        AtUri(dest.id),
-                                                        isRefresh = true
-                                                    )
+                                                if (index < feeds.size) {
+                                                    val feedId = feeds[index].first
+                                                    when (feeds[index].second) {
+                                                        is FeedItem.Following, FeedItem.ForYou -> viewModel.fetchFeed()
+                                                        is FeedItem.FeedGenerator, is FeedItem.List -> viewModel.fetchCustomFeed(
+                                                            AtUri(feedId),
+                                                            isRefresh = true
+                                                        )
+                                                    }
                                                 }
                                             }
-                                        }
-                                    },
-                                    text = {
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                        ) {
-                                            if (destination is FeedDestination.ForYou) {
-                                                Icon(
-                                                    Icons.Rounded.AutoAwesome,
-                                                    contentDescription = "Sparkles",
-                                                    tint = MaterialTheme.colorScheme.onSurface
+                                        },
+                                        text = {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                            ) {
+                                                if (destination.second is FeedItem.ForYou) {
+                                                    Icon(
+                                                        Icons.Rounded.AutoAwesome,
+                                                        contentDescription = "Sparkles",
+                                                        tint = MaterialTheme.colorScheme.onSurface
+                                                    )
+                                                }
+
+                                                Text(
+                                                    FeedItem.getName(destination.second),
+                                                    style = MaterialTheme.typography.bodySmall.copy(
+                                                        color = MaterialTheme.colorScheme.onSurface,
+                                                    )
                                                 )
                                             }
-                                            Text(
-                                                destination.title,
-                                                style = MaterialTheme.typography.bodySmall.copy(
-                                                    color = MaterialTheme.colorScheme.onSurface,
-                                                )
-                                            )
                                         }
-                                    }
-                                )
+                                    )
+                                }
                             }
                         }
                     }
-                    if (userFeeds.error != null) {
-                        item {
-                            Text(
-                                userFeeds.error!!.message ?: "Unknown error",
-                                color = MaterialTheme.colorScheme.error,
-                                modifier = Modifier.padding(16.dp)
-                            )
-                        }
+                    if (viewModel.isFetchingUserFeeds.value && feeds.isEmpty()) {
+                        Loading()
                     }
-                    if (selectedDestination == 0) {
+                    val followingFeedPosition =
+                        feeds.indexOfFirst { it.second is FeedItem.Following }
+                    val forYouFeedPosition = feeds.indexOfFirst { it.second is FeedItem.ForYou }
+                    if (feeds.isNotEmpty() && safeSelectedDestination == followingFeedPosition) {
                         if (followingFeedData != null) {
-                            items(followingFeedData) {
+                            items(
+                                items = followingFeedData,
+                                key = { it.post.uri.atUri }
+                            ) {
                                 PostComponent(it, nav) {
                                     nav.navigate(FullsizePostDestination(it.post.uri.atUri))
                                 }
                             }
-                            item {
-                                LoadMore(Unit) {
-                                    viewModel.loadMoreFollowingFeed()
+                            if (followingFeedData.isNotEmpty() && viewModel.hasMoreFollowing.value) {
+                                item {
+                                    LoadMore(followingFeedData.size) {
+                                        viewModel.loadMoreFollowingFeed()
+                                    }
                                 }
                             }
                         } else {
                             Loading()
                         }
-                    } else if (selectedDestination == 1) {
+                    } else if (feeds.isNotEmpty() && safeSelectedDestination == forYouFeedPosition) {
                         if (!forYouFeedData.isNullOrEmpty()) {
-                            items(forYouFeedData) {
+                            items(
+                                items = forYouFeedData,
+                                key = { it.post.post.uri.atUri }
+                            ) {
                                 PostComponent(it.post.post, nav, discoveryContext = {
                                     PostInsightsContext(
                                         it.feedInfo
@@ -516,9 +492,11 @@ fun Feed(nav: DestinationsNavigator) {
                                     nav.navigate(FullsizePostDestination(it.post.post.uri.atUri))
                                 }
                             }
-                            item {
-                                LoadMore(Unit) {
-                                    viewModel.loadMoreForYouFeeds()
+                            if (forYouFeedData.isNotEmpty() && viewModel.hasMoreForYou.value) {
+                                item {
+                                    LoadMore(forYouFeedData.size) {
+                                        viewModel.loadMoreForYouFeeds()
+                                    }
                                 }
                             }
                         } else if (forYouFeedData != null && forYouFeedData.isEmpty()) {
@@ -547,35 +525,48 @@ fun Feed(nav: DestinationsNavigator) {
                         } else {
                             Loading()
                         }
-                    } else {
+                    } else if (feeds.isNotEmpty()) {
                         // Custom Feed
-                        if (selectedDestination < feeds.size) {
-                            val currentFeed =
-                                feeds[selectedDestination] as? FeedDestination.UserFeed
-                            if (currentFeed != null) {
-                                if (!customFeedData.isNullOrEmpty()) {
-                                    items(customFeedData) {
-                                        PostComponent(it, nav) {
-                                            nav.navigate(FullsizePostDestination(it.post.uri.atUri))
+                        if (safeSelectedDestination < feeds.size) {
+                            val currentFeed = feeds[safeSelectedDestination]
+                            val feedId = currentFeed.first
+                            when (val item = currentFeed.second) {
+                                is FeedItem.FeedGenerator, is FeedItem.List -> {
+                                    if (!customFeedData.isNullOrEmpty()) {
+                                        items(
+                                            items = customFeedData,
+                                            key = { it.post.uri.atUri }
+                                        ) {
+                                            PostComponent(it, nav) {
+                                                nav.navigate(FullsizePostDestination(it.post.uri.atUri))
+                                            }
                                         }
-                                    }
-                                    item {
-                                        LoadMore(currentFeed.id) {
-                                            viewModel.loadMoreCustomFeed(AtUri(currentFeed.id))
+                                        if (customFeedData.isNotEmpty() && viewModel.hasMoreCustomFeed.value) {
+                                            item {
+                                                LoadMore(feedId + customFeedData.size) {
+                                                    viewModel.loadMoreCustomFeed(AtUri(feedId))
+                                                }
+                                            }
+                                        } else {
+                                            item {
+                                                Spacer(modifier = Modifier.height(150.dp))
+                                            }
                                         }
-                                    }
-                                } else {
-                                    // Trigger fetch if null (e.g. initial load if logic above failed or just safe guard)
-                                    item {
-                                        LaunchedEffect(currentFeed.id) {
-                                            viewModel.fetchCustomFeed(
-                                                AtUri(currentFeed.id),
-                                                isRefresh = true
-                                            )
+                                    } else {
+                                        // Trigger fetch if null (e.g. initial load if logic above failed or just safe guard)
+                                        item {
+                                            LaunchedEffect(feedId) {
+                                                viewModel.fetchCustomFeed(
+                                                    AtUri(feedId),
+                                                    isRefresh = true
+                                                )
+                                            }
                                         }
+                                        Loading()
                                     }
-                                    Loading()
                                 }
+
+                                else -> {}
                             }
                         }
                     }
@@ -602,14 +593,19 @@ fun Feed(nav: DestinationsNavigator) {
                             Log.d("Feed", "Fetched too recently, click ignored. Cooldown active.")
                         } else {
                             lastFetchTime = currentTime
-                            if (selectedDestination < feeds.size) {
-                                when (val dest = feeds[selectedDestination]) {
-                                    is FeedDestination.Following, FeedDestination.ForYou -> viewModel.fetchFeed(
+//                            coroutineScope.launch {
+//                                userFeeds.refresh?.invoke()
+//                            }
+                            if (feeds.isNotEmpty() && safeSelectedDestination < feeds.size) {
+                                val currentFeed = feeds[safeSelectedDestination]
+                                val feedId = currentFeed.first
+                                when (currentFeed.second) {
+                                    is FeedItem.Following, FeedItem.ForYou -> viewModel.fetchFeed(
                                         isRefresh = true
                                     )
 
-                                    is FeedDestination.UserFeed -> viewModel.fetchCustomFeed(
-                                        AtUri(dest.id),
+                                    is FeedItem.FeedGenerator, is FeedItem.List -> viewModel.fetchCustomFeed(
+                                        AtUri(feedId),
                                         isRefresh = true
                                     )
                                 }
@@ -633,10 +629,18 @@ fun LoadMore(trigger: Any, onLoad: () -> Unit) {
         onLoad()
     }
 
-LoadingIndicator(
-modifier = Modifier.padding(16.dp),
-)
-
+    Column(
+        modifier = Modifier
+            .fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        LoadingIndicator(
+            modifier = Modifier.padding(16.dp),
+        )
+        Spacer(
+            modifier = Modifier.height(130.dp)
+        )
+    }
 }
 
 @Composable
@@ -656,7 +660,16 @@ fun TopBarButtons(listState: LazyListState, navigator: DestinationsNavigator) {
         label = "iconRowAlpha"
     )
 
-    val profileModel = LocalProfileModel.current
+    var isAccountSwitcherOpen by remember { mutableStateOf(false) }
+
+    AccountSwitcherSheet(
+        isOpen = isAccountSwitcherOpen,
+        onDismiss = { isAccountSwitcherOpen = false },
+        onAddAccount = {
+            isAccountSwitcherOpen = false
+            navigator.navigate(PdsListDestination(isOnboarding = false))
+        }
+    )
 
     Box(
         modifier = Modifier
@@ -675,56 +688,16 @@ fun TopBarButtons(listState: LazyListState, navigator: DestinationsNavigator) {
                 modifier = Modifier
                     .padding(start = 6.dp)
             ) {
-                val profileUiState by profileModel.uiState.collectAsState()
-                when (profileUiState) {
-                    ProfileUiState.Loading -> {
-                        Box(
-                            modifier = Modifier
-                                .size(30.dp)
-                                .background(
-                                    MaterialTheme.colorScheme.onSurface.copy(alpha = 0.15f),
-                                    CircleShape
-                                )
-                                .clip(CircleShape)
-                                .clickable {
-                                    hapticFeedback.performHapticFeedback(HapticFeedbackType.ContextClick)
-                                    navigator.navigate(MyProfileDestination)
-                                }
-                        )
+                ProfileAvatar(
+                    modifier = Modifier
+                        .size(30.dp),
+                    onAvatarClick = {
+                        navigator.navigate(MyProfileDestination)
+                    },
+                    onAvatarLongClick = {
+                        isAccountSwitcherOpen = true
                     }
-
-                    is ProfileUiState.Error -> {
-                        Box(
-                            modifier = Modifier
-                                .size(30.dp)
-                                .background(
-                                    MaterialTheme.colorScheme.error.copy(alpha = 0.15f),
-                                    CircleShape
-                                )
-                                .clip(CircleShape)
-                                .clickable {
-                                    hapticFeedback.performHapticFeedback(HapticFeedbackType.ContextClick)
-                                    navigator.navigate(MyProfileDestination)
-                                }
-                        )
-                    }
-
-                    is ProfileUiState.Success -> {
-                        val avatarUrl =
-                            (profileUiState as ProfileUiState.Success).profile.avatar?.uri
-                        Avatar(
-                            avatarUrl = avatarUrl,
-                            modifier = Modifier
-                                .size(30.dp)
-                                .clip(CircleShape)
-                                .clickable {
-                                    hapticFeedback.performHapticFeedback(HapticFeedbackType.ContextClick)
-                                    navigator.navigate(MyProfileDestination)
-                                },
-                            contentDescription = "Avatar"
-                        )
-                    }
-                }
+                )
             }
             IconButton(onClick = {
                 hapticFeedback.performHapticFeedback(HapticFeedbackType.ContextClick)
@@ -736,6 +709,85 @@ fun TopBarButtons(listState: LazyListState, navigator: DestinationsNavigator) {
                     modifier = Modifier.size(25.dp)
                 )
             }
+        }
+    }
+}
+
+@Composable
+fun ProfileAvatar(
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    onAvatarClick: () -> Unit,
+    onAvatarLongClick: () -> Unit = {},
+){
+    val hapticFeedback = LocalHapticFeedback.current
+    val profileModel = LocalProfileModel.current
+    val profileUiState by profileModel.uiState.collectAsState()
+    when (profileUiState) {
+        ProfileUiState.Loading -> {
+            Box(
+                modifier = modifier
+                    .background(
+                        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.15f),
+                        CircleShape
+                    )
+                    .clip(CircleShape)
+                    .combinedClickable(
+                        enabled = enabled,
+                        onClick = {
+                            hapticFeedback.performHapticFeedback(HapticFeedbackType.ContextClick)
+                            onAvatarClick()
+                        },
+                        onLongClick = {
+                            hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
+                            onAvatarLongClick()
+                        }
+                    )
+            )
+        }
+
+        is ProfileUiState.Error -> {
+            Box(
+                modifier = modifier
+                    .background(
+                        MaterialTheme.colorScheme.error.copy(alpha = 0.15f),
+                        CircleShape
+                    )
+                    .clip(CircleShape)
+                    .combinedClickable(
+                        enabled = enabled,
+                        onClick = {
+                            hapticFeedback.performHapticFeedback(HapticFeedbackType.ContextClick)
+                            onAvatarClick()
+                        },
+                        onLongClick = {
+                            hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
+                            onAvatarLongClick()
+                        }
+                    )
+            )
+        }
+
+        is ProfileUiState.Success -> {
+            val avatarUrl =
+                (profileUiState as ProfileUiState.Success).profile.avatar?.uri
+            Avatar(
+                avatarUrl = avatarUrl,
+                modifier = modifier
+                    .clip(CircleShape)
+                    .combinedClickable(
+                        enabled = enabled,
+                        onClick = {
+                            hapticFeedback.performHapticFeedback(HapticFeedbackType.ContextClick)
+                            onAvatarClick()
+                        },
+                        onLongClick = {
+                            hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
+                            onAvatarLongClick()
+                        }
+                    ),
+                contentDescription = "Avatar"
+            )
         }
     }
 }

@@ -5,25 +5,31 @@ import android.util.Log
 import androidx.compose.runtime.*
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import app.bsky.actor.GetProfileQueryParams
+import app.bsky.actor.ProfileViewDetailed
 import app.bsky.actor.PreferencesUnion
 import app.bsky.feed.FeedViewPost
 import app.bsky.feed.FeedViewPostReasonUnion
 import app.bsky.feed.GetAuthorFeedQueryParams
 import app.bsky.feed.GetFeedGeneratorQueryParams
 import app.bsky.feed.GetFeedGeneratorResponse
+import app.bsky.feed.GetFeedGeneratorsQueryParams
 import app.bsky.feed.GetFeedQueryParams
 import app.bsky.feed.GetFeedResponse
 import app.bsky.feed.GetListFeedQueryParams
 import app.bsky.feed.GetPostsQueryParams
 import app.bsky.feed.GetTimelineQueryParams
 import app.bsky.feed.PostView
+import app.bsky.graph.GetListQueryParams
 import io.github.turtlepaw.fetch_and_cache.LoadResult
 import io.github.turtlepaw.mindsky.cache.PostCache
 import io.github.turtlepaw.mindsky.db.ObjectBox
 import io.github.turtlepaw.mindsky.db.SuggestedFeed
 import io.github.turtlepaw.mindsky.logic.FeedTuner
 import io.github.turtlepaw.mindsky.logic.ranking.PostScore
+import io.github.turtlepaw.mindsky.routes.FeedItem
 import io.github.turtlepaw.mindsky.utils.ApiUtils.fetchChunkedPosts
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -54,10 +60,14 @@ class FeedViewModel(
         private set
     var isFetchingMoreFollowing = mutableStateOf(false)
         private set
+    var hasMoreFollowing = mutableStateOf(true)
+        private set
 
     var isFetchingMoreForYou = mutableStateOf(false)
         private set
     var isFetchingForYou = mutableStateOf(false)
+        private set
+    var hasMoreForYou = mutableStateOf(true)
         private set
 
     var forYouFeed = mutableStateOf<List<ForYouPost>?>(null)
@@ -72,9 +82,113 @@ class FeedViewModel(
         private set
     var isFetchingMoreCustomFeed = mutableStateOf(false)
         private set
+    var hasMoreCustomFeed = mutableStateOf(true)
+        private set
 
     var error = mutableStateOf<String?>(null)
         private set
+
+    var profileDetailed = mutableStateOf<ProfileViewDetailed?>(null)
+    var isFetchingProfileMetadata = mutableStateOf(false)
+
+    fun fetchProfileMetadata(did: Did) {
+        if (profileDetailed.value?.did == did) return
+        viewModelScope.launch {
+            isFetchingProfileMetadata.value = true
+            try {
+                profileDetailed.value = api.getProfile(GetProfileQueryParams(did)).requireResponse()
+            } catch (e: Exception) {
+                if (e is CancellationException || e.message?.contains("cancel", ignoreCase = true) == true) throw e
+                Log.e("FeedVM", "Error fetching profile metadata", e)
+            } finally {
+                isFetchingProfileMetadata.value = false
+            }
+        }
+    }
+
+    var userFeeds = mutableStateOf<List<Pair<String, FeedItem>>>(emptyList())
+    var isFetchingUserFeeds = mutableStateOf(false)
+
+    fun fetchUserFeeds() {
+        if (userFeeds.value.isNotEmpty()) return
+        viewModelScope.launch {
+            isFetchingUserFeeds.value = true
+            try {
+                val prefs = api.getPreferencesForActor().requireResponse()
+                val savedFeedUris: List<String> = when (
+                    val pref = prefs.preferences.firstOrNull {
+                        it is PreferencesUnion.SavedFeedsPrefV2 || it is PreferencesUnion.SavedFeedsPref
+                    }
+                ) {
+                    is PreferencesUnion.SavedFeedsPrefV2 -> pref.value.items
+                        .filter { it.pinned }
+                        .map { it.value }
+
+                    is PreferencesUnion.SavedFeedsPref -> pref.value.pinned.map { it.toString() }
+                    else -> emptyList()
+                }
+
+                val fetchable = savedFeedUris.filter { it != "following" }
+
+                val feedGenerators = fetchable
+                    .filter { it.contains("app.bsky.feed.generator") }
+                    .map { AtUri(it) }
+                val fetchedFeedGenerators = if (feedGenerators.isNotEmpty()) {
+                    api.getFeedGenerators(
+                        GetFeedGeneratorsQueryParams(
+                            feeds = feedGenerators
+                        )
+                    ).requireResponse().feeds.associateBy { it.uri.atUri }
+                } else {
+                    emptyMap()
+                }
+
+                val lists = fetchable.filter { it.contains("app.bsky.graph.list") }
+                    .map { AtUri(it) }
+                val fetchedLists = if (lists.isNotEmpty()) {
+                    lists.map {
+                        api.getList(
+                            GetListQueryParams(
+                                list = it,
+                                limit = 1
+                            )
+                        ).requireResponse().list
+                    }
+                } else {
+                    emptyList()
+                }
+
+                val ordered = mutableListOf<Pair<String, FeedItem>>()
+                ordered.add("for_you" to FeedItem.ForYou)
+                for (item in savedFeedUris) {
+                    val feed = when {
+                        item.contains("app.bsky.feed.generator") -> {
+                            val generator = fetchedFeedGenerators[item] ?: continue
+                            FeedItem.FeedGenerator(generator)
+                        }
+
+                        item.contains("app.bsky.graph.list") -> {
+                            val list = fetchedLists.firstOrNull { it.uri.atUri == item } ?: continue
+                            FeedItem.List(list)
+                        }
+
+                        item == "following" -> FeedItem.Following()
+                        else -> null
+                    }
+
+                    if (feed != null) {
+                        ordered.add(item to feed)
+                    }
+                }
+                userFeeds.value = ordered
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                Log.e("FeedVM", "Error fetching user feeds", e)
+            } finally {
+                isFetchingUserFeeds.value = false
+            }
+        }
+    }
 
     var userFeedCursors = mutableMapOf<AtUri, String?>()
 
@@ -112,13 +226,15 @@ class FeedViewModel(
             isFetchingCustomFeed.value = true
             if (isRefresh) {
                 userFeedCursors[uri] = null
-                customFeed.value = emptyList()
+                hasMoreCustomFeed.value = true
             }
             error.value = null
 
             try {
                 val feedResponse = fetchUserFeed(uri)
                 val newPosts = FeedTuner.cleanReplies(feedResponse)
+                
+                hasMoreCustomFeed.value = userFeedCursors[uri] != null
 
                 // Cache all posts
                 newPosts.forEach { addCachedPost(it.post) }
@@ -129,6 +245,7 @@ class FeedViewModel(
                     customFeed.value = (customFeed.value ?: emptyList()) + newPosts
                 }
             } catch (e: Exception) {
+                if (e is CancellationException) throw e
                 Log.e("FeedVM", "Error fetching custom feed", e)
                 error.value = "Failed to fetch custom feed: ${e.message}"
             } finally {
@@ -139,7 +256,10 @@ class FeedViewModel(
 
     fun loadMoreCustomFeed(uri: AtUri) {
         if (isFetchingCustomFeed.value || isFetchingMoreCustomFeed.value) return
-        if (userFeedCursors[uri] == null && customFeed.value?.isNotEmpty() == true) return
+        if (userFeedCursors[uri] == null && customFeed.value?.isNotEmpty() == true) {
+            hasMoreCustomFeed.value = false
+            return
+        }
 
         viewModelScope.launch {
             isFetchingMoreCustomFeed.value = true
@@ -147,12 +267,15 @@ class FeedViewModel(
             try {
                 val feedResponse = fetchUserFeed(uri)
                 val newPosts = FeedTuner.cleanReplies(feedResponse)
+                
+                hasMoreCustomFeed.value = userFeedCursors[uri] != null
 
                 // Cache all posts
                 newPosts.forEach { addCachedPost(it.post) }
 
                 customFeed.value = (customFeed.value ?: emptyList()) + newPosts
             } catch (e: Exception) {
+                if (e is CancellationException) throw e
                 Log.e("FeedVM", "Error loading more custom feed posts", e)
                 error.value = "Failed to load more posts: ${e.message}"
             } finally {
@@ -220,6 +343,8 @@ class FeedViewModel(
     private var profileCursor: String? = null
     var isFetchingProfile = mutableStateOf(false)
         private set
+    var hasMoreProfile = mutableStateOf(true)
+        private set
 
     fun fetchProfilePosts(
         actor: Did,
@@ -233,7 +358,7 @@ class FeedViewModel(
             error.value = null
             if (isRefresh) {
                 profileCursor = null
-                profilePosts.value = emptyList() // Optional: clear UI fast
+                hasMoreProfile.value = true
             }
 
             try {
@@ -245,8 +370,15 @@ class FeedViewModel(
                     )
                 ).maybeResponse()
 
+                // log cursor and new cursor
+                Log.d("FeedVM", "Cursor: ${profileCursor}, New Cursor: ${response?.cursor}")
+// log how many new posts were fetched
+                Log.d("FeedVM", "Fetched ${response?.feed?.size} new posts")
+
+
                 val newPosts = FeedTuner.cleanReplies(response?.feed ?: emptyList())
                 profileCursor = response?.cursor
+                hasMoreProfile.value = profileCursor != null
 
                 // Cache them
                 newPosts.forEach { addCachedPost(it.post) }
@@ -259,6 +391,7 @@ class FeedViewModel(
                 }
 
             } catch (e: Exception) {
+                if (e is CancellationException) throw e
                 Log.e("FeedVM", "Error fetching profile posts", e)
                 error.value = "Failed to load profile: ${e.message}"
             } finally {
@@ -270,7 +403,10 @@ class FeedViewModel(
     fun loadMoreProfilePosts(limit: Int = 30) {
         val assumedActor =
             profilePosts.value.firstOrNull { it.reason !is FeedViewPostReasonUnion.ReasonRepost }?.post?.author?.did
-        if (isFetchingProfile.value || profileCursor == null || assumedActor == null) return
+        if (isFetchingProfile.value || profileCursor == null || assumedActor == null) {
+            if (profileCursor == null) hasMoreProfile.value = false
+            return
+        }
 
         fetchProfilePosts(assumedActor, limit, isRefresh = false)
     }
@@ -316,24 +452,37 @@ class FeedViewModel(
         var error by remember { mutableStateOf<String?>(null) }
 
         LaunchedEffect(uri) {
+            isLoading = true
+            error = null
+            
+            // 1. Try cache first
             val cachedPost = getCachedPost(AtUri(uri))
-            if (post == null) {
+            if (cachedPost != null) {
                 post = cachedPost
                 isLoading = false
             }
-        }
 
-        LaunchedEffect(post) {
-            scope.launch {
-                try {
-                    val fetchedPost = api.getPosts(
-                        GetPostsQueryParams(
-                            uris = listOf(AtUri(uri))
-                        )
-                    ).requireResponse().posts.first()
-                } catch (e: Exception) {
+            // 2. Always fetch fresh from API (or only if not in cache, but fresh is usually better)
+            try {
+                val fetchedPost = api.getPosts(
+                    GetPostsQueryParams(
+                        uris = listOf(AtUri(uri))
+                    )
+                ).requireResponse().posts.firstOrNull()
+                
+                if (fetchedPost != null) {
+                    post = fetchedPost
+                    addCachedPost(fetchedPost)
+                } else if (post == null) {
+                    error = "Post not found"
+                }
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                Log.e("FeedVM", "Error fetching post $uri", e)
+                if (post == null) {
                     error = e.message
                 }
+            } finally {
                 isLoading = false
             }
         }
@@ -365,6 +514,8 @@ class FeedViewModel(
             isFetchingFeed.value = true
             if (isRefresh) {
                 followingFeedCursor = null
+                hasMoreFollowing.value = true
+                hasMoreForYou.value = true
             }
             lastFetchTime = now
             error.value = null
@@ -377,12 +528,14 @@ class FeedViewModel(
                 )
 
                 Log.d("FeedVM", "Fetching For You feed.")
-                fetchForYou()
+                fetchForYou(isLoadMore = false)
                 fetchHighlightsPostsInternal()
             } catch (e: Exception) {
+                if (e is CancellationException || e.message?.contains("cancel", ignoreCase = true) == true) throw e
                 Log.e("FeedVM", "Error fetching feeds (Exception)", e)
                 error.value = "Failed to fetch feeds: ${e.message}"
             } catch (t: Throwable) {
+                if (t is CancellationException || t.message?.contains("cancel", ignoreCase = true) == true) throw t
                 Log.e("FeedVM", "Error fetching feeds (Throwable)", t)
                 error.value = "An unexpected error occurred: ${t.message}"
             } finally {
@@ -408,10 +561,21 @@ class FeedViewModel(
                 limit = limit
             )
         )
+        
+        Log.d("FeedVM", "Timeline response received")
 
         timelineResponse.maybeResponse().let { response ->
-            val newPosts = FeedTuner.cleanReplies(response?.feed ?: emptyList())
-            followingFeedCursor = response?.cursor
+            if (response == null) {
+                Log.w("FeedVM", "Timeline response body is null (error or empty)")
+                if (!isLoadMore) {
+                    followingFeed.value = emptyList()
+                }
+                return@let
+            }
+            
+            val newPosts = FeedTuner.cleanReplies(response.feed)
+            followingFeedCursor = response.cursor
+            hasMoreFollowing.value = followingFeedCursor != null
 
             // Cache all posts
             newPosts.forEach { addCachedPost(it.post) }
@@ -431,6 +595,7 @@ class FeedViewModel(
         }
         if (followingFeedCursor == null && followingFeed.value?.isNotEmpty() == true) {
             Log.d("FeedVM", "No cursor available, cannot load more (all items loaded).")
+            hasMoreFollowing.value = false
             return
         }
 
@@ -440,9 +605,11 @@ class FeedViewModel(
             try {
                 fetchFollowingPostsInternal(limit = limit, isLoadMore = true)
             } catch (e: Exception) {
+                if (e is CancellationException) throw e
                 Log.e("FeedVM", "Error loading more following posts (Exception)", e)
                 error.value = "Failed to load more posts: ${e.message}"
             } catch (t: Throwable) {
+                if (t is CancellationException) throw t
                 Log.e("FeedVM", "Error loading more following posts (Throwable)", t)
                 error.value = "An unexpected error occurred while loading more: ${t.message}"
             } finally {
@@ -454,7 +621,7 @@ class FeedViewModel(
     var feeds = emptyList<Pair<SuggestedFeed, GetFeedGeneratorResponse>>()
     var cursors = mutableMapOf<AtUri, String>()
 
-    private suspend fun fetchForYou(limit: Long = 5) {
+    private suspend fun fetchForYou(limit: Long = 5, isLoadMore: Boolean = false) {
         val resolvedFeeds = feeds.ifEmpty {
             val box = ObjectBox.store.boxFor(SuggestedFeed::class.java)
             box.all.mapNotNull {
@@ -480,7 +647,7 @@ class FeedViewModel(
                 GetFeedQueryParams(
                     feed = generatorResponse.view.uri,
                     limit = limit,
-                    cursor = cursors[generatorResponse.view.uri]
+                    cursor = if (isLoadMore) cursors[generatorResponse.view.uri] else null
                 )
             ).maybeResponse()
 
@@ -497,8 +664,14 @@ class FeedViewModel(
 
             forYouPosts
         }.shuffled()
+        
+        hasMoreForYou.value = cursors.values.any { it.isNotBlank() }
 
-        forYouFeed.value = posts
+        if (isLoadMore) {
+            forYouFeed.value = (forYouFeed.value ?: emptyList()) + posts
+        } else {
+            forYouFeed.value = posts
+        }
     }
 
     fun loadMoreForYouFeeds() {
@@ -506,8 +679,9 @@ class FeedViewModel(
             Log.d("FeedVM", "Cannot load more: Another fetch operation is in progress.")
             return
         }
-        if (cursors.isEmpty()) {
+        if (cursors.isEmpty() || cursors.values.all { it.isBlank() }) {
             Log.d("FeedVM", "No cursor available, cannot load more (all items loaded).")
+            hasMoreForYou.value = false
             return
         }
 
@@ -515,11 +689,13 @@ class FeedViewModel(
             isFetchingMoreForYou.value = true
             error.value = null
             try {
-                fetchForYou()
+                fetchForYou(isLoadMore = true)
             } catch (e: Exception) {
+                if (e is CancellationException) throw e
                 Log.e("FeedVM", "Error loading more for you posts (Exception)", e)
                 error.value = "Failed to load more posts: ${e.message}"
             } catch (t: Throwable) {
+                if (t is CancellationException) throw t
                 Log.e("FeedVM", "Error loading more for you posts (Throwable)", t)
                 error.value = "An unexpected error occurred while loading more: ${t.message}"
             } finally {

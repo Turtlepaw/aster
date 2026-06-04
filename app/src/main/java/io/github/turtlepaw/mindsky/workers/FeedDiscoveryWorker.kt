@@ -29,7 +29,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import sh.christian.ozone.api.AtUri
-import sh.christian.ozone.api.AuthenticatedXrpcBlueskyApi
+import sh.christian.ozone.BlueskyApi
 import sh.christian.ozone.api.response.AtpResponse
 import kotlin.math.sqrt
 
@@ -240,7 +240,7 @@ class FeedDiscoveryWorker(
     }
 
     // Phase 2: Fetch popular feeds to analyze
-    private suspend fun fetchPopularFeeds(api: AuthenticatedXrpcBlueskyApi): List<FeedCandidate> = withContext(Dispatchers.IO) {
+    private suspend fun fetchPopularFeeds(api: BlueskyApi): List<FeedCandidate> = withContext(Dispatchers.IO) {
         Log.i("FeedDiscoveryWorker", "Phase 2: Fetching popular feeds...")
         updateProgressNotification(WorkStage.FETCHING_POPULAR_FEEDS, 0, indeterminate = true)
 
@@ -303,7 +303,7 @@ class FeedDiscoveryWorker(
 
     // Phase 3: Compute semantic similarities between feeds and user interests
     private suspend fun computeFeedSimilarities(
-        api: AuthenticatedXrpcBlueskyApi,
+        api: BlueskyApi,
         interestProfiles: List<InterestProfile>,
         feedCandidates: List<FeedCandidate>
     ): List<FeedWithSimilarity> = withContext(Dispatchers.IO) {
@@ -411,7 +411,7 @@ class FeedDiscoveryWorker(
     }
 
     // Helper functions
-    private suspend fun sampleFeedPosts(api: AuthenticatedXrpcBlueskyApi, feedUri: AtUri): List<PostSample> {
+    private suspend fun sampleFeedPosts(api: BlueskyApi, feedUri: AtUri): List<PostSample> {
         return try {
             val response = api.getFeed(
                 GetFeedQueryParams(

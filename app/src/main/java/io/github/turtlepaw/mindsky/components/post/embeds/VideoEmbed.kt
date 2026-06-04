@@ -59,9 +59,8 @@ import androidx.media3.ui.PlayerView
 import coil3.compose.AsyncImage
 import kotlin.OptIn
 
-@androidx.annotation.OptIn(UnstableApi::class)
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
-@Suppress("ExperimentalMaterial3Api")
+@androidx.annotation.OptIn(UnstableApi::class)
 @Composable
 fun VideoEmbed(
     videoUrl: String,

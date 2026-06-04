@@ -40,6 +40,7 @@ import com.ramcosta.composedestinations.annotation.Destination
 import com.ramcosta.composedestinations.annotation.RootGraph
 import com.ramcosta.composedestinations.generated.destinations.DownloadModelDestination
 import com.ramcosta.composedestinations.generated.destinations.PdsListDestination
+import com.ramcosta.composedestinations.generated.NavGraphs
 import com.ramcosta.composedestinations.navigation.DestinationsNavigator
 import io.github.turtlepaw.mindsky.MindskyApplication
 import io.github.turtlepaw.mindsky.auth.AuthState
@@ -51,7 +52,7 @@ import io.github.turtlepaw.mindsky.viewmodels.rememberAuthViewModel
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Destination<RootGraph>
 @Composable
-fun Login(navigator: DestinationsNavigator, pds: String) {
+fun Login(navigator: DestinationsNavigator, pds: String, isOnboarding: Boolean = true) {
     val viewModel = rememberOnboardingViewModel()
     val context = LocalContext.current
 
@@ -65,8 +66,15 @@ fun Login(navigator: DestinationsNavigator, pds: String) {
             val session = (authState as AuthState.Authenticated).session
             val application = context.applicationContext as MindskyApplication
             application.configureAuthenticatedApi(session)
-            navigator.popBackStack()
-            navigator.replaceCurrent(DownloadModelDestination)
+            if (isOnboarding) {
+                navigator.navigate(DownloadModelDestination) {
+                    popUpTo(NavGraphs.root) {
+                        inclusive = true
+                    }
+                }
+            } else {
+                navigator.popBackStack()
+            }
         }
     }
 

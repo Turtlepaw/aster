@@ -1,5 +1,6 @@
 package io.github.turtlepaw.mindsky.components
 
+import android.util.Log
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Spring
@@ -14,6 +15,7 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -39,14 +41,20 @@ import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -59,16 +67,21 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
 import androidx.navigation.compose.currentBackStackEntryAsState
+import app.bsky.notification.GetUnreadCountQueryParams
+import app.bsky.notification.GetUnreadCountResponse
 import com.ramcosta.composedestinations.generated.destinations.ComposerDestination
 import com.ramcosta.composedestinations.generated.destinations.FeedDestination
 import com.ramcosta.composedestinations.generated.destinations.InitialOnboardingDestination
 import com.ramcosta.composedestinations.generated.destinations.MyProfileDestination
+import com.ramcosta.composedestinations.generated.destinations.PdsListDestination
 import com.ramcosta.composedestinations.generated.destinations.ProfileDestination
 import com.ramcosta.composedestinations.generated.destinations.SearchDestination
 import com.ramcosta.composedestinations.generated.destinations.NotificationsDestination
 import com.ramcosta.composedestinations.spec.Direction
+import io.github.turtlepaw.fetch_and_cache.SingleCache
 import io.github.turtlepaw.mindsky.R
 import io.github.turtlepaw.mindsky.auth.UserSession
+import io.github.turtlepaw.mindsky.di.LocalMindskyApi
 import io.github.turtlepaw.mindsky.di.LocalScrollToTop
 import io.github.turtlepaw.mindsky.di.LocalSessionManager
 import kotlin.collections.contains
@@ -90,15 +103,36 @@ fun BottomBar(navController: NavController, modifier: Modifier = Modifier) {
     val currentRoute = backStackEntry?.destination?.route
     val identity = backStackEntry?.arguments?.getString("identity")
 
+    var isAccountSwitcherOpen by remember { mutableStateOf(false) }
+
     val isOnProfileRoute = currentRoute == ProfileDestination.route
     val isMyProfile = identity == session?.did
     //val isCompact = isOnProfileRoute && !isMyProfile
     val isCompact = false
+    val api = LocalMindskyApi.current
+
+    AccountSwitcherSheet(
+        isOpen = isAccountSwitcherOpen,
+        onDismiss = { isAccountSwitcherOpen = false },
+        onAddAccount = {
+            isAccountSwitcherOpen = false
+            navController.navigate(PdsListDestination(isOnboarding = false))
+        }
+    )
+
+    val notificationCount = SingleCache.rememberLoad(
+        fetcher = {
+            api.getUnreadCount(
+                GetUnreadCountQueryParams()
+            ).requireResponse()
+        },
+        serializer = GetUnreadCountResponse.serializer(),
+        identifier = "notification_count"
+    )
 
     val visibleRoutes = setOf(
         FeedDestination.route,
         ProfileDestination.route,
-        MyProfileDestination.route,
         SearchDestination.route,
         NotificationsDestination.route
     )
@@ -189,9 +223,11 @@ fun BottomBar(navController: NavController, modifier: Modifier = Modifier) {
                         NavItems(
                             session = session,
                             currentRoute = currentRoute,
-                            identity = identity ?: "",
+                            identity = session?.did ?: "",
                             navController = navController,
-                            scrollToTopHandler = scrollToTopHandler
+                            scrollToTopHandler = scrollToTopHandler,
+                            unreadCount = notificationCount.value?.count ?: 0,
+                            onLongPressProfile = { isAccountSwitcherOpen = true }
                         )
                     }
                 }
@@ -210,7 +246,7 @@ fun BottomBar(navController: NavController, modifier: Modifier = Modifier) {
                         )
                         .clickable {
                             haptics.performHapticFeedback(HapticFeedbackType.Confirm)
-                            navController.navigate(ComposerDestination.route)
+                            navController.navigate(ComposerDestination().route)
                         },
                     contentAlignment = Alignment.Center
                 ) {
@@ -242,7 +278,9 @@ fun NavItems(
     currentRoute: String?,
     identity: String,
     navController: NavController,
-    scrollToTopHandler: MutableState<(() -> Unit)?>
+    scrollToTopHandler: MutableState<(() -> Unit)?>,
+    unreadCount: Long = 0,
+    onLongPressProfile: () -> Unit = {}
 ) {
     val haptics = LocalHapticFeedback.current
     val items = listOf(
@@ -262,8 +300,8 @@ fun NavItems(
             NavRouteMetadata("Notifications", Icons.Rounded.Notifications)
         ),
         NavItem(
-            ProfileDestination(session?.did ?: ""),
-            setOf(ProfileDestination.route, MyProfileDestination.route),
+            ProfileDestination(identity),
+            setOf(ProfileDestination.route),
             NavRouteMetadata("Profile", Icons.Rounded.Person)
         ),
     )
@@ -284,6 +322,7 @@ fun NavItems(
     ) {
         items.forEach { item ->
             val isSelected = currentRoute in item.selectionRoutes
+            val isProfile = item.direction.route == ProfileDestination.route
             Row(
                 modifier = Modifier
                     .weight(1f)
@@ -294,30 +333,60 @@ fun NavItems(
                         else MaterialTheme.colorScheme.surfaceContainerLow,
                         RoundedCornerShape(100.dp)
                     )
-                    .clickable {
-                        haptics.performHapticFeedback(HapticFeedbackType.Confirm)
-                        if (isSelected) {
-                            scrollToTopHandler.value?.invoke()
-                        } else {
-                            navController.navigate(item.direction.route) {
-                                popUpTo(navController.graph.startDestinationId) {
-                                    saveState = true
+                    .combinedClickable(
+                        onClick = {
+                            haptics.performHapticFeedback(HapticFeedbackType.Confirm)
+                            if (isSelected) {
+                                scrollToTopHandler.value?.invoke()
+                            } else {
+                                navController.navigate(item.direction.route) {
+                                    popUpTo(navController.graph.startDestinationId) {
+                                        saveState = true
+                                    }
+                                    launchSingleTop = true
+                                    restoreState = true
                                 }
-                                launchSingleTop = true
-                                restoreState = true
                             }
-                        }
-                    }
+                        },
+                        onLongClick = if (isProfile) {
+                            {
+                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                onLongPressProfile()
+                            }
+                        } else null
+                    )
                     .padding(horizontal = 12.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.Center
             ) {
-                Icon(
-                    imageVector = item.metadata.icon,
-                    contentDescription = item.metadata.label,
-                    tint = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer
-                    else MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                val isNotifications = item.direction.route == NotificationsDestination.route
+                if (isNotifications) {
+                    BadgedBox(
+                        badge = {
+                            if (unreadCount > 0) {
+                                Badge {
+                                    Text(
+                                        if (unreadCount > 99) "99+" else unreadCount.toString()
+                                    )
+                                }
+                            }
+                        }
+                    ) {
+                        Icon(
+                            imageVector = item.metadata.icon,
+                            contentDescription = item.metadata.label,
+                            tint = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer
+                            else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                } else {
+                    Icon(
+                        imageVector = item.metadata.icon,
+                        contentDescription = item.metadata.label,
+                        tint = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer
+                        else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
         }
     }

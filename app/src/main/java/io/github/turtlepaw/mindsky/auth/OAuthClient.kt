@@ -57,8 +57,8 @@ class OAuthClient(
     suspend fun startOAuthFlowWithHandle(handle: String): String = withContext(Dispatchers.IO) {
         Log.d(TAG, "Starting OAuth flow for handle: $handle")
 
-        val did = resolveHandleToDid(handle)
-        val pdsUrl = getPdsUrlFromDid(did)
+        val did = resolveHandleToDid(handle, httpClient)
+        val pdsUrl = getPdsUrlFromDid(did, httpClient)
         val authServerUrl = discoverAuthorizationServer(pdsUrl)
         val metadata = getAuthorizationServerMetadata(authServerUrl)
 
@@ -84,7 +84,7 @@ class OAuthClient(
         }
 
         sessionManager.saveOAuthState(
-            OAuthState(expectedState!!, codeVerifier!!, authServerUrl, handle)
+            OAuthState(expectedState!!, codeVerifier!!, authServerUrl, handle, did)
         )
 
         authUrl
@@ -200,35 +200,6 @@ class OAuthClient(
         newSession
     }
 
-    private suspend fun resolveHandleToDid(handle: String): String {
-        val response: HttpResponse = httpClient.get(
-            "https://slingshot.microcosm.blue/xrpc/com.atproto.identity.resolveHandle?handle=$handle"
-        )
-        if (!response.status.isSuccess()) {
-            throw Exception("Could not resolve handle to DID")
-        }
-
-        val text = response.bodyAsText()
-        return json.decodeFromString<SlingshotResponse>(text).did
-    }
-
-    private suspend fun getPdsUrlFromDid(did: String): String {
-        val didDocText = when {
-            did.startsWith("did:plc:") -> httpClient.get("https://plc.directory/$did").bodyAsText()
-            did.startsWith("did:web:") -> {
-                val domain = did.removePrefix("did:web:")
-                httpClient.get("https://$domain/.well-known/did.json").bodyAsText()
-            }
-            else -> throw Exception("Unsupported DID method")
-        }
-
-        val didDoc = json.decodeFromString<DidDocument>(didDocText)
-        val pdsService = didDoc.service?.firstOrNull { it.type == "AtprotoPersonalDataServer" }
-            ?: throw Exception("No PDS service found in DID document")
-
-        return pdsService.serviceEndpoint
-    }
-
     private suspend fun discoverAuthorizationServer(pdsUrl: String): String {
         val response: HttpResponse = httpClient.get("$pdsUrl/.well-known/oauth-protected-resource")
         if (response.status.isSuccess()) {
@@ -296,8 +267,10 @@ class OAuthClient(
         val tokenResponse = json.decodeFromString<TokenResponse>(response.bodyAsText())
 
         val did = tokenResponse.sub ?: throw Exception("No sub in token response")
-        val handle = resolveDidToHandle(did)
-        val pdsUrl = getPdsUrlFromDid(did)
+        val profile = resolveDidToProfile(did)
+        val handle = profile.first
+        val avatarUrl = profile.second
+        val pdsUrl = getPdsUrlFromDid(did, httpClient)
 
         return UserSession(
             did = did,
@@ -306,7 +279,8 @@ class OAuthClient(
             refreshToken = tokenResponse.refreshToken ?: throw Exception("No refresh token"),
             tokenType = tokenResponse.tokenType,
             expiresAt = tokenResponse.expiresIn?.let { System.currentTimeMillis() + it * 1000 },
-            pdsUrl = pdsUrl
+            pdsUrl = pdsUrl,
+            avatarUrl = avatarUrl
         )
     }
 
@@ -367,7 +341,7 @@ class OAuthClient(
         return parResponse.requestUri
     }
 
-    private suspend fun resolveDidToHandle(did: String): String {
+    private suspend fun resolveDidToProfile(did: String): Pair<String, String?> {
         val didDocText = when {
             did.startsWith("did:plc:") -> httpClient.get("https://plc.directory/$did").bodyAsText()
             did.startsWith("did:web:") -> {
@@ -379,9 +353,9 @@ class OAuthClient(
 
         val didDoc = json.decodeFromString<DidDocument>(didDocText)
         val atUri = didDoc.alsoKnownAs?.firstOrNull { it.startsWith("at://") }
-            ?: return did
+        val handle = atUri?.removePrefix("at://") ?: did
 
-        return atUri.removePrefix("at://")
+        return handle to null
     }
 
     private fun buildAuthorizationUrl(
@@ -454,4 +428,43 @@ class OAuthClient(
             }
         }
     }
+}
+
+suspend fun getPdsUrlFromDid(did: String, httpClient: HttpClient = HttpClient()): String {
+    val json = Json {
+        ignoreUnknownKeys = true
+        isLenient = true
+        encodeDefaults = true
+    }
+    val didDocText = when {
+        did.startsWith("did:plc:") -> httpClient.get("https://plc.directory/$did").bodyAsText()
+        did.startsWith("did:web:") -> {
+            val domain = did.removePrefix("did:web:")
+            httpClient.get("https://$domain/.well-known/did.json").bodyAsText()
+        }
+        else -> throw Exception("Unsupported DID method")
+    }
+
+    val didDoc = json.decodeFromString<DidDocument>(didDocText)
+    val pdsService = didDoc.service?.firstOrNull { it.type == "AtprotoPersonalDataServer" }
+        ?: throw Exception("No PDS service found in DID document")
+
+    return pdsService.serviceEndpoint
+}
+
+suspend fun resolveHandleToDid(handle: String, httpClient: HttpClient = HttpClient()): String {
+    val json = Json {
+        ignoreUnknownKeys = true
+        isLenient = true
+        encodeDefaults = true
+    }
+    val response: HttpResponse = httpClient.get(
+        "https://slingshot.microcosm.blue/xrpc/com.atproto.identity.resolveHandle?handle=$handle"
+    )
+    if (!response.status.isSuccess()) {
+        throw Exception("Could not resolve handle to DID")
+    }
+
+    val text = response.bodyAsText()
+    return json.decodeFromString<SlingshotResponse>(text).did
 }

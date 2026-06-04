@@ -40,8 +40,8 @@ import com.ramcosta.composedestinations.annotation.RootGraph
 import com.ramcosta.composedestinations.generated.destinations.FullsizePostDestination
 import com.ramcosta.composedestinations.generated.destinations.RepliesDestination
 import com.ramcosta.composedestinations.navigation.DestinationsNavigator
-import io.github.turtlepaw.fetch_and_cache.SingleCache
-import io.github.turtlepaw.fetch_and_cache.SingleCacheLoadResult
+import io.github.turtlepaw.fetch_and_cache.CollectionCache
+import io.github.turtlepaw.fetch_and_cache.CollectionCacheLoadResult
 import io.github.turtlepaw.mindsky.R
 import io.github.turtlepaw.mindsky.components.post.LoadingPost
 import io.github.turtlepaw.mindsky.components.post.PostComponent
@@ -58,9 +58,9 @@ internal const val ReplyPageSize = 15
 internal const val MaxNestedDepth = 2
 
 @Composable
-internal fun rememberThreadReplies(postUri: String, depth: Int): SingleCacheLoadResult<ThreadViewPost> {
+internal fun rememberThreadReplies(postUri: String, depth: Int): CollectionCacheLoadResult<ThreadViewPost> {
     val api = LocalMindskyApi.current
-    return SingleCache.rememberLoad(
+    return CollectionCache.rememberLoad(
         fetcher = {
             val result = api.getPostThread(
                 GetPostThreadQueryParams(
@@ -72,7 +72,7 @@ internal fun rememberThreadReplies(postUri: String, depth: Int): SingleCacheLoad
             val threadPost = result as? GetPostThreadResponseThreadUnion.ThreadViewPost
                 ?: throw Exception("Post not found or blocked")
 
-            threadPost.value.replies
+            threadPost.value.replies.orEmpty()
                 .filterIsInstance<ThreadViewPostReplieUnion.ThreadViewPost>()
                 .associate { it.value.post.uri.atUri to it.value }
         },
@@ -165,7 +165,8 @@ fun Replies(navigator: DestinationsNavigator, postUri: String, focusReplyUri: St
             items(visibleReplies, key = { it.post.uri.atUri }) { reply ->
                 PostReplies(
                     reply.post,
-                    reply.replies.filterIsInstance<ThreadViewPostReplieUnion.ThreadViewPost>(),
+                    reply.replies.orEmpty()
+                        .filterIsInstance<ThreadViewPostReplieUnion.ThreadViewPost>(),
                     navigator,
                     rootPostUri = postUri,
                     depthLimit = MaxNestedDepth
@@ -298,14 +299,14 @@ internal fun RenderReply(
                     navigator = navigator,
                     density = PostDensity.Regular,
                     showReply = false,
-                    showSeparator = reply.value.replies.isEmpty()
+                    showSeparator = reply.value.replies.orEmpty().isEmpty()
                 ) {
                     navigator.navigate(
                         FullsizePostDestination(reply.value.post.uri.atUri)
                     )
                 }
 
-                val childReplies = reply.value.replies
+                val childReplies = reply.value.replies.orEmpty()
                     .filterIsInstance<ThreadViewPostReplieUnion.ThreadViewPost>()
 
                 if (childReplies.isNotEmpty()) {
@@ -339,7 +340,7 @@ internal fun RenderReply(
 private fun findLastReplyUri(replies: List<ThreadViewPost>): String? {
     var lastUri: String? = null
     for (reply in replies) {
-        val nested = reply.replies
+        val nested = reply.replies.orEmpty()
             .filterIsInstance<ThreadViewPostReplieUnion.ThreadViewPost>()
             .map { it.value }
         val nestedUri = findLastReplyUri(nested)
@@ -361,7 +362,7 @@ private fun containsReply(reply: ThreadViewPost, targetUri: String): Boolean {
     if (reply.post.uri.atUri == targetUri) {
         return true
     }
-    return reply.replies
+    return reply.replies.orEmpty()
         .filterIsInstance<ThreadViewPostReplieUnion.ThreadViewPost>()
         .any { containsReply(it.value, targetUri) }
 }

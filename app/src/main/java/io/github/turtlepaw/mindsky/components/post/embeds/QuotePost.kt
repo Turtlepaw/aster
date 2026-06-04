@@ -8,9 +8,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import app.bsky.embed.RecordViewRecord
+import app.bsky.embed.RecordViewRecordEmbedUnion
 import app.bsky.embed.RecordViewRecordUnion
 import app.bsky.feed.GetPostsQueryParams
 import app.bsky.feed.PostView
+import app.bsky.feed.PostViewEmbedUnion
 import com.atproto.repo.GetRecordQueryParams
 import com.atproto.repo.StrongRef
 import com.ramcosta.composedestinations.generated.destinations.FullsizePostDestination
@@ -22,6 +24,7 @@ import io.github.turtlepaw.mindsky.components.post.PostDensity
 import io.github.turtlepaw.mindsky.di.LocalFeedModel
 import io.github.turtlepaw.mindsky.di.LocalMindskyApi
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.Json
 import sh.christian.ozone.api.AtIdentifier
 import sh.christian.ozone.api.Did
 import sh.christian.ozone.api.Handle
@@ -29,55 +32,39 @@ import sh.christian.ozone.api.Nsid
 import sh.christian.ozone.api.RKey
 
 @Composable
-fun QuotePost(record: RecordViewRecordUnion.ViewRecord, navigator: DestinationsNavigator) {
-    val api = LocalMindskyApi.current
-    val viewModel = LocalFeedModel.current
-    var isLoading by remember { mutableStateOf(true) }
-    var postRecord by remember { mutableStateOf<PostView?>(null) }
-    val coroutineScope = rememberCoroutineScope()
+fun QuotePost(record: RecordViewRecord, navigator: DestinationsNavigator) {
+    val json = Json {
+        ignoreUnknownKeys = true
+        classDiscriminator = "\$type"
 
-    LaunchedEffect(record) {
-        coroutineScope.launch {
-            isLoading = true
-            try {
-                val recordData = record.value.toStrongRef()
-                val cached = viewModel.getCachedPost(record.value.uri)
-                if (cached != null) {
-                    postRecord = cached
-                } else {
-                    val data = api.getPosts(
-                        GetPostsQueryParams(
-                            listOf(
-                                record.value.uri
-                            )
-                        )
-                    ).maybeResponse()
-                    if (data != null) {
-                        postRecord = data.posts.first()
-                        if(data.posts.firstOrNull() != null) viewModel.addCachedPost(data.posts.first())
-                    }
-                }
-            } finally {
-                isLoading = false
-            }
-        }
     }
+    val value = PostView(
+        record = record.value,
+        uri = record.uri,
+        cid = record.cid,
+        author = record.author,
+        viewer = null,
+        quoteCount = record.quoteCount,
+        embed = record.embeds?.firstOrNull()?.toPostViewEmbedUnion(),
+        bookmarkCount = null,
+        replyCount = record.replyCount,
+        repostCount = record.repostCount,
+        likeCount = record.likeCount,
+        indexedAt = record.indexedAt,
+        labels = record.labels,
+        threadgate = null,
+        debug = null,
+    )
 
     EmbedStructure(onClick = {}) {
-        if (isLoading) {
-            LoadingPost()
-        } else if (postRecord != null) {
-            PostComponent(
-                postRecord!!,
-                navigator,
-                showActions = false,
-                density = PostDensity.Compact,
-                showLabels = false
-            ) {
-                navigator.navigate(FullsizePostDestination(postRecord!!.uri.atUri))
-            }
-        } else {
-            ErrorMessage()
+        PostComponent(
+            value,
+            navigator,
+            showActions = false,
+            density = PostDensity.Compact,
+            showLabels = false
+        ) {
+            navigator.navigate(FullsizePostDestination(value!!.uri.atUri))
         }
     }
 }
@@ -87,4 +74,15 @@ fun RecordViewRecord.toStrongRef(): StrongRef {
         uri = this.uri,
         cid = this.cid,
     )
+}
+
+fun RecordViewRecordEmbedUnion.toPostViewEmbedUnion(): PostViewEmbedUnion {
+    return when (this) {
+        is RecordViewRecordEmbedUnion.ImagesView -> PostViewEmbedUnion.ImagesView(this.value)
+        is RecordViewRecordEmbedUnion.VideoView -> PostViewEmbedUnion.VideoView(this.value)
+        is RecordViewRecordEmbedUnion.ExternalView -> PostViewEmbedUnion.ExternalView(this.value)
+        is RecordViewRecordEmbedUnion.RecordView -> PostViewEmbedUnion.RecordView(this.value)
+        is RecordViewRecordEmbedUnion.RecordWithMediaView -> PostViewEmbedUnion.RecordWithMediaView(this.value)
+        is RecordViewRecordEmbedUnion.Unknown -> PostViewEmbedUnion.Unknown(this.value)
+    }
 }

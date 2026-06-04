@@ -1,9 +1,11 @@
 package io.github.turtlepaw.mindsky.components.post
 
+import android.content.ClipData
 import android.os.Build
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.util.Log
+import android.widget.Toast
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -12,14 +14,13 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.text.ClickableText
 import androidx.compose.foundation.layout.Arrangement.spacedBy
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -33,19 +34,31 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Reply
+import androidx.compose.material.icons.rounded.Build
 import androidx.compose.material.icons.rounded.ChatBubbleOutline
+import androidx.compose.material.icons.rounded.ContentCopy
+import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
+import androidx.compose.material.icons.rounded.MoreHoriz
 import androidx.compose.material.icons.rounded.Repeat
-import androidx.compose.material3.Button
+import androidx.compose.material.icons.rounded.Share
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.MenuDefaults
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.PlainTooltip
 import androidx.compose.material3.Text
+import androidx.compose.material3.TooltipAnchorPosition
+import androidx.compose.material3.TooltipBox
+import androidx.compose.material3.TooltipDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.material3.rememberTooltipState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -56,32 +69,28 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.ClipEntry
+import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
-import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.platform.LocalUriHandler
-import androidx.compose.ui.text.LinkAnnotation
-import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.TextLinkStyles
-import androidx.compose.ui.text.withLink
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.paneTitle
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import app.bsky.embed.RecordViewRecordUnion
 import app.bsky.feed.FeedViewPost
 import app.bsky.feed.FeedViewPostReasonUnion
-import app.bsky.feed.GetLikesQueryParams
-import app.bsky.feed.GetRepostedByQueryParams
 import app.bsky.feed.Like
 import app.bsky.feed.Post
 import app.bsky.feed.PostView
 import app.bsky.feed.PostViewEmbedUnion
 import app.bsky.feed.Repost
-import app.bsky.richtext.FacetFeatureUnion
 import coil3.compose.AsyncImage
-import com.atproto.label.Label
 import com.atproto.repo.CreateRecordRequest
 import com.atproto.repo.DeleteRecordRequest
 import com.atproto.repo.StrongRef
@@ -92,31 +101,26 @@ import com.ramcosta.composedestinations.navigation.DestinationsNavigator
 import io.github.turtlepaw.mindsky.R
 import io.github.turtlepaw.mindsky.auth.SessionManager
 import io.github.turtlepaw.mindsky.components.Avatar
+import io.github.turtlepaw.mindsky.components.ConfirmationSheet
 import io.github.turtlepaw.mindsky.components.post.embeds.FeedGraphDisplay
 import io.github.turtlepaw.mindsky.components.post.embeds.InformationalEmbed
 import io.github.turtlepaw.mindsky.components.post.embeds.LinkEmbed
 import io.github.turtlepaw.mindsky.components.post.embeds.QuotePost
 import io.github.turtlepaw.mindsky.components.post.embeds.StarterPack
 import io.github.turtlepaw.mindsky.components.post.embeds.VideoEmbed
-import io.github.turtlepaw.mindsky.di.LocalIdentityProvider
 import io.github.turtlepaw.mindsky.di.LocalMindskyApi
 import io.github.turtlepaw.mindsky.di.LocalPostState
+import io.github.turtlepaw.mindsky.preferences.AppPrefs
 import io.github.turtlepaw.mindsky.routes.UserListType
 import io.github.turtlepaw.mindsky.utils.sanitize
 import kotlinx.coroutines.launch
-import kotlinx.datetime.Clock
-import kotlinx.serialization.EncodeDefault
-import kotlinx.serialization.SerialName
-import kotlinx.serialization.Serializable
+import kotlin.time.Clock
 import kotlinx.serialization.json.Json
 import sh.christian.ozone.api.AtUri
 import sh.christian.ozone.api.Did
 import sh.christian.ozone.api.Nsid
 import sh.christian.ozone.api.RKey
 import sh.christian.ozone.api.model.JsonContent.Companion.encodeAsJsonContent
-import sh.christian.ozone.api.model.Timestamp
-import java.net.URLEncoder
-import java.nio.charset.StandardCharsets
 import kotlin.math.max
 
 @Composable
@@ -128,60 +132,13 @@ fun PostComponent(
     onClick: () -> Unit
 ) {
     PostComponent(
-        postView.post,
-        navigator,
-        postView.reason,
+        postView = postView.post,
+        navigator = navigator,
+        reason = postView.reason,
         onClick = onClick,
         enabled = enabled,
         density = density,
     )
-}
-
-
-@Serializable
-public data class AppBskyFeedLike(
-    @OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)
-    @EncodeDefault
-    public val `$type`: String = "app.bsky.feed.like",
-    public val subject: StrongRef,
-    public val via: StrongRef? = null,
-    public val createdAt: Timestamp,
-) {
-    companion object {
-        public fun fromSubject(
-            subject: StrongRef,
-            via: StrongRef? = null
-        ): AppBskyFeedLike {
-            return AppBskyFeedLike(
-                subject = subject,
-                via = via,
-                createdAt = Clock.System.now()
-            )
-        }
-    }
-}
-
-@Serializable
-public data class AppBskyFeedRepost(
-    @OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)
-    @EncodeDefault
-    public val `$type`: String = "app.bsky.feed.repost",
-    public val subject: StrongRef,
-    public val via: StrongRef? = null,
-    public val createdAt: Timestamp,
-) {
-    companion object {
-        public fun create(
-            subject: StrongRef,
-            via: StrongRef? = null
-        ): AppBskyFeedRepost {
-            return AppBskyFeedRepost(
-                subject = subject,
-                via = via,
-                createdAt = Clock.System.now()
-            )
-        }
-    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -254,10 +211,12 @@ fun RepostSheet(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PostComponent(
     postView: PostView,
     navigator: DestinationsNavigator,
+    modifier: Modifier = Modifier,
     reason: FeedViewPostReasonUnion? = null,
     discoveryContext: @Composable () -> Unit = {},
     showActions: Boolean = true,
@@ -266,9 +225,11 @@ fun PostComponent(
     showReply: Boolean = true,
     showSeparator: Boolean = true,
     showLabels: Boolean = true,
+    showHandle: Boolean = true,
     onClick: () -> Unit,
 ) {
     val author = postView.author
+    val primaryColor = MaterialTheme.colorScheme.primary
     val postRecord = try {
         Log.d("PostDebug", "Raw record JSON: ${postView.record}")
         postView.record.decodeAs<Post>()
@@ -290,8 +251,11 @@ fun PostComponent(
     val coroutineScope = rememberCoroutineScope()
     val haptics = LocalHapticFeedback.current
     var isRepostSheetOpen by remember { mutableStateOf(false) }
+    var isDeleteConfirmationOpen by remember { mutableStateOf(false) }
+    val developerMode by AppPrefs.DeveloperMode.stateFlow.collectAsState()
     val via = null
     val postState = LocalPostState.current
+    val viewerIsAuthor = author.did.did == session?.did
 
     val viewerLike = postView.viewer?.like
     val viewerRepost = postView.viewer?.repost
@@ -346,9 +310,10 @@ fun PostComponent(
                         val repost = api.createRecord(
                             CreateRecordRequest(
                                 record = Json.encodeAsJsonContent(
-                                    AppBskyFeedRepost.create(
+                                    Repost(
                                         subject = StrongRef(postView.uri, postView.cid),
-                                        via = via
+                                        via = via,
+                                        createdAt = Clock.System.now()
                                     )
                                 ),
                                 repo = Did(session!!.did),
@@ -363,6 +328,38 @@ fun PostComponent(
             }
         },
         isReposted = currentState.repostUri != null
+    )
+
+    ConfirmationSheet(
+        isOpen = isDeleteConfirmationOpen,
+        onDismiss = { isDeleteConfirmationOpen = false },
+        onConfirm = {
+            coroutineScope.launch {
+                try {
+                    api.deleteRecord(
+                        DeleteRecordRequest(
+                            collection = Nsid("app.bsky.feed.post"),
+                            repo = Did(session!!.did),
+                            rkey = postView.uri.getRkey(),
+                        )
+                    ).requireResponse()
+                } catch (e: Exception) {
+                    Toast
+                        .makeText(
+                            context,
+                            "Failed to delete post",
+                            Toast.LENGTH_SHORT
+                        )
+                        .show()
+                    e.printStackTrace()
+                }
+            }
+        },
+        title = stringResource(R.string.delete_post_title),
+        description = stringResource(R.string.delete_post_description),
+        confirmText = stringResource(R.string.delete),
+        dismissText = stringResource(R.string.cancel),
+        isDestructive = true
     )
 
     PostStructure(
@@ -416,7 +413,13 @@ fun PostComponent(
             }
         },
         headline = {
-            PostHeadline(postRecord.createdAt, author, density, showLabels)
+            PostHeadline(
+                timestamp = postRecord.createdAt,
+                author = author,
+                density = density,
+                showLabels = showLabels,
+                showHandle = showHandle
+            )
         },
         impressions = {
             FlowRow(it, horizontalArrangement = spacedBy(24.dp)) {
@@ -451,66 +454,222 @@ fun PostComponent(
         showImpressions = hasImpressions,
         actions = {
             if (showActions) {
-                FlowRow(it, horizontalArrangement = spacedBy(24.dp)) {
-                    PostAction.Button(
-                        label = postView.replyCount,
-                        icon = Icons.Rounded.ChatBubbleOutline,
-                        contentDescription = "Chat Bubble",
-                    ) { }
-                    PostAction.Button(
-                        label = displayRepostCount,
-                        icon = Icons.Rounded.Repeat,
-                        contentDescription = "Repeat",
-                        isHighlighted = repostUri != null,
-                    ) {
-                        isRepostSheetOpen = true
-                    }
-                    PostAction.Button(
-                        label = displayLikeCount,
-                        icon = if (likeUri != null) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
-                        contentDescription = "Heart",
-                        isHighlighted = likeUri != null,
-                    ) {
-                        coroutineScope.launch {
-                            val session = SessionManager(context).getSession()
-                            val collection = Nsid("app.bsky.feed.like")
-                            val vibrator =
-                                ContextCompat.getSystemService(context, Vibrator::class.java)!!
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                                vibrator.vibrate(
-                                    VibrationEffect.createPredefined(
-                                        if (likeUri != null) VibrationEffect.EFFECT_TICK
-                                        else VibrationEffect.EFFECT_DOUBLE_CLICK
+                Row(
+                    modifier = it,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(horizontalArrangement = spacedBy(24.dp)) {
+                        PostAction.Button(
+                            label = postView.replyCount,
+                            icon = Icons.Rounded.ChatBubbleOutline,
+                            contentDescription = "Chat Bubble",
+                        ) { }
+                        PostAction.Button(
+                            label = displayRepostCount,
+                            icon = Icons.Rounded.Repeat,
+                            contentDescription = "Repeat",
+                            isHighlighted = repostUri != null,
+                        ) {
+                            isRepostSheetOpen = true
+                        }
+                        PostAction.Button(
+                            label = displayLikeCount,
+                            icon = if (likeUri != null) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
+                            contentDescription = "Heart",
+                            isHighlighted = likeUri != null,
+                        ) {
+                            coroutineScope.launch {
+                                val session = SessionManager(context).getSession()
+                                val collection = Nsid("app.bsky.feed.like")
+                                val vibrator =
+                                    ContextCompat.getSystemService(context, Vibrator::class.java)!!
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                                    vibrator.vibrate(
+                                        VibrationEffect.createPredefined(
+                                            if (likeUri != null) VibrationEffect.EFFECT_TICK
+                                            else VibrationEffect.EFFECT_DOUBLE_CLICK
+                                        )
                                     )
-                                )
-                            } else {
-                                vibrator.vibrate(50)
-                            }
-                            val currentLikeUri = postState.getLike(postView.uri)
-                            if (currentLikeUri != null) {
-                                postState.setLike(postView.uri, null)
-                                api.deleteRecord(
-                                    DeleteRecordRequest(
-                                        collection = collection,
-                                        repo = Did(session!!.did),
-                                        rkey = currentLikeUri.getRkey(),
-                                    ),
-                                ).requireResponse()
-                            } else {
-                                val data = api.createRecord(
-                                    CreateRecordRequest(
-                                        record = Json.encodeAsJsonContent(
-                                            AppBskyFeedLike.fromSubject(
-                                                StrongRef(postView.uri, postView.cid),
-                                                via = via
-                                            ),
+                                } else {
+                                    vibrator.vibrate(50)
+                                }
+                                val currentLikeUri = postState.getLike(postView.uri)
+                                if (currentLikeUri != null) {
+                                    postState.setLike(postView.uri, null)
+                                    api.deleteRecord(
+                                        DeleteRecordRequest(
+                                            collection = collection,
+                                            repo = Did(session!!.did),
+                                            rkey = currentLikeUri.getRkey(),
                                         ),
-                                        repo = Did(session!!.did),
-                                        collection = collection,
-                                    )
-                                ).requireResponse()
-                                postState.setLike(postView.uri, data.uri)
+                                    ).requireResponse()
+                                } else {
+                                    val data = api.createRecord(
+                                        CreateRecordRequest(
+                                            record = Json.encodeAsJsonContent(
+                                                Like(
+                                                    StrongRef(postView.uri, postView.cid),
+                                                    via = via,
+                                                    createdAt = Clock.System.now()
+                                                ),
+                                            ),
+                                            repo = Did(session!!.did),
+                                            collection = collection,
+                                        )
+                                    ).requireResponse()
+                                    postState.setLike(postView.uri, data.uri)
+                                }
                             }
+                        }
+                    }
+
+                    val groupInteractionSource = remember { MutableInteractionSource() }
+                    var expanded by remember { mutableStateOf(false) }
+
+                    val text = stringResource(R.string.more)
+                    Box() {
+                        // Icon button should have a tooltip associated with it for a11y.
+                        TooltipBox(
+                            positionProvider =
+                                TooltipDefaults.rememberTooltipPositionProvider(
+                                    TooltipAnchorPosition.Above
+                                ),
+                            tooltip = {
+                                PlainTooltip(
+                                    Modifier.semantics() {
+                                        // TODO(b/496338253): Remove this modifier once bug where tooltip text is
+                                        //  not announced by a11y screen readers is resolved.
+                                        liveRegion = LiveRegionMode.Assertive
+                                        paneTitle = text
+                                    }
+                                ) {
+                                    Text(text)
+                                }
+                            },
+                            state = rememberTooltipState(),
+                        ) {
+                            PostAction.Button(
+                                icon = Icons.Rounded.MoreHoriz,
+                                contentDescription = text,
+                            ) {
+                                expanded = true
+                            }
+                        }
+                        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                            val clipboardManager = LocalClipboard.current
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.copy_text)) },
+                                leadingIcon =
+                                    {
+                                        Icon(
+                                            Icons.Rounded.ContentCopy,
+                                            contentDescription = stringResource(R.string.copy_text)
+                                        )
+                                    },
+                                onClick = {
+                                    coroutineScope.launch {
+                                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        clipboardManager.setClipEntry(
+                                            ClipEntry(
+                                                ClipData.newPlainText(
+                                                    "Post content",
+                                                    postRecord.text
+                                                )
+                                            )
+                                        )
+
+                                        Toast.makeText(
+                                            context,
+                                            "Copied to clipboard",
+                                            Toast.LENGTH_SHORT
+                                        ).show()
+
+                                        expanded = false
+                                    }
+                                }
+                            )
+
+                            val baseUrl by AppPrefs.BaseUrl.stateFlow.collectAsState()
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.copy_link_to_post)) },
+                                leadingIcon =
+                                    {
+                                        Icon(
+                                            Icons.Rounded.Share,
+                                            contentDescription = stringResource(R.string.share)
+                                        )
+                                    },
+                                onClick = {
+                                    coroutineScope.launch {
+                                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        clipboardManager.setClipEntry(
+                                            ClipEntry(
+                                                ClipData.newPlainText(
+                                                    "Link to post",
+                                                    "$baseUrl/profile/${author.did.did}/post/${postView.uri.getRkey()}"
+                                                )
+                                            )
+                                        )
+
+                                        Toast.makeText(
+                                            context,
+                                            "Copied to clipboard",
+                                            Toast.LENGTH_SHORT
+                                        ).show()
+
+                                        expanded = false
+                                    }
+                                }
+                            )
+                            if (viewerIsAuthor) DropdownMenuItem(
+                                text = {
+                                    Text(stringResource(R.string.delete))
+                                },
+                                leadingIcon =
+                                    {
+                                        Icon(
+                                            Icons.Rounded.Delete,
+                                            contentDescription = null,
+                                        )
+                                    },
+                                onClick = {
+                                    isDeleteConfirmationOpen = true
+                                    expanded = false
+                                }
+                            )
+
+                            if (developerMode) DropdownMenuItem(
+                                text = {
+                                    Text("Copy Raw JSON")
+                                },
+                                leadingIcon = {
+                                    Icon(
+                                        Icons.Rounded.Build,
+                                        contentDescription = null,
+                                    )
+                                },
+                                onClick = {
+                                    coroutineScope.launch {
+                                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        clipboardManager.setClipEntry(
+                                            ClipEntry(
+                                                ClipData.newPlainText(
+                                                    "Post JSON",
+                                                    postView.record.toString()
+                                                )
+                                            )
+                                        )
+
+                                        Toast.makeText(
+                                            context,
+                                            "Copied raw JSON to clipboard",
+                                            Toast.LENGTH_SHORT
+                                        ).show()
+
+                                        expanded = false
+                                    }
+                                }
+                            )
                         }
                     }
                 }
@@ -519,7 +678,8 @@ fun PostComponent(
         density = density,
         onClick = if (enabled) onClick else null,
         createdAt = postRecord.createdAt,
-        showSeparator = showSeparator
+        showSeparator = showSeparator,
+        modifier = modifier
     ) {
         if (density == PostDensity.Expanded) Labelers(author.labels)
         if (postRecord.reply != null && showReply) {
@@ -543,117 +703,11 @@ fun PostComponent(
             }
         }
 
-        val uriHandler = LocalUriHandler.current
-        val annotatedText = buildAnnotatedString {
-            append(postRecord.text)
-            val textBytes = postRecord.text.toByteArray(StandardCharsets.UTF_8)
-
-            val textByteLength = textBytes.size
-
-            postRecord.facets?.forEach { facet ->
-                val byteStart = facet.index.byteStart.toInt().coerceIn(0, textByteLength)
-                val byteEnd = facet.index.byteEnd.toInt().coerceIn(byteStart, textByteLength)
-
-                // Convert byte offsets to char offsets correctly
-                val charStart = String(textBytes, 0, byteStart, StandardCharsets.UTF_8).length
-                val charEnd = String(textBytes, 0, byteEnd, StandardCharsets.UTF_8).length
-
-                if (charStart >= charEnd) {
-                    Log.w(
-                        "PostComponent",
-                        "Skipping invalid facet range: charStart=$charStart, charEnd=$charEnd from byteStart=$byteStart, byteEnd=$byteEnd. Text: ${postRecord.text}"
-                    )
-                    return@forEach // Skip invalid or empty ranges
-                }
-
-                facet.features.forEach { feature ->
-                    when (feature) {
-                        is FacetFeatureUnion.Link -> {
-                            addStyle(
-                                style = MaterialTheme.typography.bodyLarge.copy(
-                                    color = MaterialTheme.colorScheme.primary,
-                                    textDecoration = TextDecoration.Underline
-                                ).toSpanStyle(),
-                                start = charStart,
-                                end = charEnd
-                            )
-                            addStringAnnotation(
-                                tag = "url",
-                                annotation = feature.value.uri.uri,
-                                start = charStart,
-                                end = charEnd
-                            )
-                        }
-
-                        is FacetFeatureUnion.Mention -> {
-                            addStyle(
-                                style = MaterialTheme.typography.bodyLarge.copy(
-                                    color = MaterialTheme.colorScheme.primary,
-                                    fontWeight = FontWeight.Bold
-                                ).toSpanStyle(),
-                                start = charStart,
-                                end = charEnd
-                            )
-                            addStringAnnotation(
-                                tag = "did",
-                                annotation = feature.value.did.did,
-                                start = charStart,
-                                end = charEnd
-                            )
-                        }
-
-                        is FacetFeatureUnion.Tag -> {
-                            addStyle(
-                                style = MaterialTheme.typography.bodyLarge.copy(
-                                    color = MaterialTheme.colorScheme.primary,
-                                ).toSpanStyle(),
-                                start = charStart,
-                                end = charEnd
-                            )
-                            addStringAnnotation(
-                                tag = "tag",
-                                annotation = feature.value.tag,
-                                start = charStart,
-                                end = charEnd
-                            )
-                        }
-
-                        else -> {
-                            // Handle Unknown or other types if necessary
-                        }
-                    }
-                }
-            }
-        }
-
-        ClickableText(
-            text = annotatedText,
-            style = MaterialTheme.typography.bodyLarge.copy(color = MaterialTheme.colorScheme.onSurface),
-            onClick = { offset ->
-                annotatedText.getStringAnnotations("url", offset, offset)
-                    .firstOrNull()
-                    ?.let { annotation ->
-                        uriHandler.openUri(annotation.item)
-                        return@ClickableText
-                    }
-
-                annotatedText.getStringAnnotations("did", offset, offset)
-                    .firstOrNull()
-                    ?.let { annotation ->
-                        navigator.navigate(ProfileDestination(annotation.item))
-                        return@ClickableText
-                    }
-
-                annotatedText.getStringAnnotations("tag", offset, offset)
-                    .firstOrNull()
-                    ?.let { annotation ->
-                        val queryTag =
-                            if (annotation.item.startsWith("#")) annotation.item.substring(1) else annotation.item
-                        val encodedTag =
-                            URLEncoder.encode(queryTag, StandardCharsets.UTF_8.name())
-                        uriHandler.openUri("https://bsky.app/search?q=%23$encodedTag")
-                    }
-            }
+        RichText(
+            text = postRecord.text,
+            facets = postRecord.facets,
+            navigator = navigator,
+            linkColor = primaryColor
         )
 
         when (postView.embed) {
@@ -705,11 +759,9 @@ fun PostComponent(
 
             is PostViewEmbedUnion.RecordView -> {
                 val recordEmbed = (postView.embed as PostViewEmbedUnion.RecordView).value
-                val record = recordEmbed.record
-
-                when (record) {
+                when (val record = recordEmbed.record) {
                     is RecordViewRecordUnion.ViewRecord -> {
-                        QuotePost(record, navigator)
+                        QuotePost(record.value, navigator)
                     }
 
                     is RecordViewRecordUnion.FeedGeneratorView -> {
@@ -789,15 +841,6 @@ fun LoadingPost() {
     val color = rememberLoadingColor()
 
     PostStructure(
-        avatar = {
-            Box(
-                modifier = it
-                    .background(
-                        color,
-                        CircleShape
-                    )
-            )
-        },
         headline = {
             Box(
                 modifier = Modifier
@@ -810,22 +853,32 @@ fun LoadingPost() {
                     )
             )
         },
+        avatar = {
+            Box(
+                modifier = it
+                    .background(
+                        color,
+                        CircleShape
+                    )
+            )
+        },
         metadata = {},
         actions = {},
         impressions = {},
-        createdAt = Clock.System.now()
-    ) {
-        repeat(3) {
-            Box(
-                modifier = Modifier
-                    .padding(vertical = 4.dp)
-                    .fillMaxWidth(if (it == 2) 0.8f else 0.9f)
-                    .height(9.dp)
-                    .background(
-                        color,
-                        MaterialTheme.shapes.small
-                    )
-            )
-        }
-    }
+        createdAt = Clock.System.now(),
+        content = {
+            repeat(3) {
+                Box(
+                    modifier = Modifier
+                        .padding(vertical = 4.dp)
+                        .fillMaxWidth(if (it == 2) 0.8f else 0.9f)
+                        .height(9.dp)
+                        .background(
+                            color,
+                            MaterialTheme.shapes.small
+                        )
+                )
+            }
+        },
+    )
 }

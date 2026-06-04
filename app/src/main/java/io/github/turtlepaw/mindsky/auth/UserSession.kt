@@ -7,5 +7,6 @@ data class UserSession(
     val refreshToken: String,
     val tokenType: String = "DPoP",
     val expiresAt: Long? = null,
-    val pdsUrl: String = ""
+    val pdsUrl: String = "",
+    val avatarUrl: String? = null
 )

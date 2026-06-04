@@ -44,8 +44,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.atproto.repo.ListRecordsQueryParams
 import com.ramcosta.composedestinations.navigation.DestinationsNavigator
-import io.github.turtlepaw.fetch_and_cache.SingleCache
-import io.github.turtlepaw.fetch_and_cache.SingleCacheLoadResult
+import io.github.turtlepaw.fetch_and_cache.CollectionCache
+import io.github.turtlepaw.fetch_and_cache.CollectionCacheLoadResult
 import io.github.turtlepaw.mindsky.di.LocalMindskyApi
 import kotlinx.serialization.Serializable
 import sh.christian.ozone.api.Did
@@ -245,7 +245,7 @@ data class ResolveResponse(
 )
 
 @Composable
-internal fun rememberTangledRepos(identifier: String): SingleCacheLoadResult<TangledRepo> {
+internal fun rememberTangledRepos(identifier: String): CollectionCacheLoadResult<TangledRepo> {
     val context = LocalContext.current
     val client = HttpClient(OkHttp) {
         install(Logging) {
@@ -271,7 +271,7 @@ internal fun rememberTangledRepos(identifier: String): SingleCacheLoadResult<Tan
         }
     )
 
-    return SingleCache.rememberLoad(
+    return CollectionCache.rememberLoad(
         fetcher = {
             val user = pdsCache.loadAsync(identifier, context)
             if (user.value == null) throw Exception("Failed to resolve PDS for $identifier")

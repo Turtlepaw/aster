@@ -32,7 +32,7 @@ import io.objectbox.Box
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
-import sh.christian.ozone.api.AuthenticatedXrpcBlueskyApi
+import sh.christian.ozone.BlueskyApi
 import sh.christian.ozone.api.Did
 
 class SignalProcessingWorker(
@@ -122,7 +122,7 @@ class SignalProcessingWorker(
     }
 
     private suspend fun fetchLikesPageInternal(
-        api: AuthenticatedXrpcBlueskyApi,
+        api: BlueskyApi,
         userDid: Did,
         cursor: String?
     ): GetActorLikesResponse? {
@@ -221,7 +221,7 @@ class SignalProcessingWorker(
     }
 
     private suspend fun getLikes(
-        api: AuthenticatedXrpcBlueskyApi,
+        api: BlueskyApi,
         session: UserSession,
         knownUris: MutableSet<String>,
         onProgress: suspend (Int) -> Unit
