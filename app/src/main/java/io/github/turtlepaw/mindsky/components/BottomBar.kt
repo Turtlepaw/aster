@@ -1,10 +1,8 @@
 package io.github.turtlepaw.mindsky.components
 
-import android.util.Log
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
@@ -18,7 +16,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -27,14 +24,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Home
-import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PostAdd
 import androidx.compose.material.icons.rounded.ArrowUpward
 import androidx.compose.material.icons.rounded.Home
@@ -43,7 +36,6 @@ import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
-import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -67,21 +59,18 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
 import androidx.navigation.compose.currentBackStackEntryAsState
-import app.bsky.notification.GetUnreadCountQueryParams
-import app.bsky.notification.GetUnreadCountResponse
 import com.ramcosta.composedestinations.generated.destinations.ComposerDestination
 import com.ramcosta.composedestinations.generated.destinations.FeedDestination
 import com.ramcosta.composedestinations.generated.destinations.InitialOnboardingDestination
-import com.ramcosta.composedestinations.generated.destinations.MyProfileDestination
 import com.ramcosta.composedestinations.generated.destinations.PdsListDestination
 import com.ramcosta.composedestinations.generated.destinations.ProfileDestination
 import com.ramcosta.composedestinations.generated.destinations.SearchDestination
 import com.ramcosta.composedestinations.generated.destinations.NotificationsDestination
 import com.ramcosta.composedestinations.spec.Direction
-import io.github.turtlepaw.fetch_and_cache.SingleCache
-import io.github.turtlepaw.mindsky.R
-import io.github.turtlepaw.mindsky.auth.UserSession
+import fyi.kittens.shared.R
+import fyi.kittens.shared.auth.UserSession
 import io.github.turtlepaw.mindsky.di.LocalMindskyApi
+import io.github.turtlepaw.mindsky.di.LocalNotificationCountProvider
 import io.github.turtlepaw.mindsky.di.LocalScrollToTop
 import io.github.turtlepaw.mindsky.di.LocalSessionManager
 import kotlin.collections.contains
@@ -101,14 +90,14 @@ fun BottomBar(navController: NavController, modifier: Modifier = Modifier) {
     val haptics = LocalHapticFeedback.current
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route
-    val identity = backStackEntry?.arguments?.getString("identity")
+    val identity = backStackEntry?.arguments?.getString("did")
 
     var isAccountSwitcherOpen by remember { mutableStateOf(false) }
 
     val isOnProfileRoute = currentRoute == ProfileDestination.route
     val isMyProfile = identity == session?.did
-    //val isCompact = isOnProfileRoute && !isMyProfile
-    val isCompact = false
+    val isCompact = isOnProfileRoute && !isMyProfile
+    //val isCompact = false
     val api = LocalMindskyApi.current
 
     AccountSwitcherSheet(
@@ -116,19 +105,11 @@ fun BottomBar(navController: NavController, modifier: Modifier = Modifier) {
         onDismiss = { isAccountSwitcherOpen = false },
         onAddAccount = {
             isAccountSwitcherOpen = false
-            navController.navigate(PdsListDestination(isOnboarding = false))
+            navController.navigate(PdsListDestination(isOnboarding = false).route)
         }
     )
 
-    val notificationCount = SingleCache.rememberLoad(
-        fetcher = {
-            api.getUnreadCount(
-                GetUnreadCountQueryParams()
-            ).requireResponse()
-        },
-        serializer = GetUnreadCountResponse.serializer(),
-        identifier = "notification_count"
-    )
+    val notificationCount = LocalNotificationCountProvider.current
 
     val visibleRoutes = setOf(
         FeedDestination.route,
@@ -137,8 +118,8 @@ fun BottomBar(navController: NavController, modifier: Modifier = Modifier) {
         NotificationsDestination.route
     )
 
-    LaunchedEffect(session) {
-        if (session == null) {
+    LaunchedEffect(session, currentRoute) {
+        if (session == null && currentRoute in visibleRoutes) {
             navController.navigate(InitialOnboardingDestination.route) {
                 popUpTo(navController.graph.id) { inclusive = true }
             }
@@ -163,8 +144,7 @@ fun BottomBar(navController: NavController, modifier: Modifier = Modifier) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .safeDrawingPadding()
-                .padding(bottom = 20.dp),
+                .safeDrawingPadding(),
             contentAlignment = Alignment.Center
         ) {
             Row(
@@ -172,7 +152,7 @@ fun BottomBar(navController: NavController, modifier: Modifier = Modifier) {
                     .fillMaxWidth(barWidth)
                     .height(64.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = if (isCompact) Arrangement.Center else Arrangement.spacedBy(8.dp)
             ) {
                 // Nav section (animated between compact scroll-to-top and full nav)
                 AnimatedContent(
@@ -196,7 +176,7 @@ fun BottomBar(navController: NavController, modifier: Modifier = Modifier) {
                         Box(
                             modifier = Modifier
                                 .fillMaxHeight()
-                                .aspectRatio(1f)
+                                .aspectRatio(1.5f)
                                 .clip(CircleShape)
                                 .background(
                                     MaterialTheme.colorScheme.surfaceContainerLow,
@@ -230,31 +210,34 @@ fun BottomBar(navController: NavController, modifier: Modifier = Modifier) {
                             onLongPressProfile = { isAccountSwitcherOpen = true }
                         )
                     }
+
                 }
 
-                // Post button
-                Box(
-                    modifier = Modifier
-                        .fillMaxHeight()
-                        .aspectRatio(1f)
-                        .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.surfaceContainerLow, CircleShape)
-                        .border(
-                            1.dp,
-                            MaterialTheme.colorScheme.surfaceContainerHighest,
-                            CircleShape
+                if(!isCompact){
+                    // Post button
+                    Box(
+                        modifier = Modifier
+                            .fillMaxHeight()
+                            .aspectRatio(1f)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.surfaceContainerLow, CircleShape)
+                            .border(
+                                1.dp,
+                                MaterialTheme.colorScheme.surfaceContainerHighest,
+                                CircleShape
+                            )
+                            .clickable {
+                                haptics.performHapticFeedback(HapticFeedbackType.Confirm)
+                                navController.navigate(ComposerDestination().route)
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            Icons.Filled.PostAdd,
+                            stringResource(R.string.post),
+                            tint = MaterialTheme.colorScheme.primary,
                         )
-                        .clickable {
-                            haptics.performHapticFeedback(HapticFeedbackType.Confirm)
-                            navController.navigate(ComposerDestination().route)
-                        },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        Icons.Filled.PostAdd,
-                        stringResource(R.string.post),
-                        tint = MaterialTheme.colorScheme.primary,
-                    )
+                    }
                 }
             }
         }
@@ -322,7 +305,7 @@ fun NavItems(
     ) {
         items.forEach { item ->
             val isSelected = currentRoute in item.selectionRoutes
-            val isProfile = item.direction.route == ProfileDestination.route
+            val isProfile = item.direction.route == ProfileDestination(identity).route
             Row(
                 modifier = Modifier
                     .weight(1f)

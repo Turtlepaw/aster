@@ -8,6 +8,9 @@ import android.util.Base64
 import android.util.Log
 import androidx.core.content.edit
 import com.google.gson.Gson
+import fyi.kittens.shared.auth.OAuthState
+import fyi.kittens.shared.auth.SessionProvider
+import fyi.kittens.shared.auth.UserSession
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -18,7 +21,7 @@ import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
-class SessionManager(private val context: Context) {
+class SessionManager(private val context: Context) : SessionProvider {
 
     private val alias = "mindsky_aes_key"
     private val prefsName = "mindsky_prefs"
@@ -29,15 +32,27 @@ class SessionManager(private val context: Context) {
     private val gson = Gson()
 
     private val _sessionFlow = MutableStateFlow<UserSession?>(null)
-    val sessionFlow: StateFlow<UserSession?> = _sessionFlow.asStateFlow()
+    override val sessionFlow: StateFlow<UserSession?> = _sessionFlow.asStateFlow()
+
+    private val _isInitialized = MutableStateFlow(false)
+    val isInitialized: StateFlow<Boolean> = _isInitialized.asStateFlow()
 
     val currentDid get() = sessionFlow.value?.did
 
     init {
-        generateSecretKeyIfNotExists()
-        val currentDid = prefs.getString(currentDidKey, null)
-        if (currentDid != null) {
-            _sessionFlow.value = getSession(currentDid)
+        try {
+            generateSecretKeyIfNotExists()
+            val currentDid = prefs.getString(currentDidKey, null)
+            if (currentDid != null) {
+                Log.d("SessionManager", "Loading session for $currentDid")
+                _sessionFlow.value = getSession(currentDid)
+            } else {
+                Log.d("SessionManager", "No session found on disk")
+            }
+        } catch (e: Exception) {
+            Log.e("SessionManager", "Critical error in session initialization", e)
+        } finally {
+            _isInitialized.value = true
         }
     }
 
@@ -76,18 +91,23 @@ class SessionManager(private val context: Context) {
     }
 
     private fun decrypt(encoded: String): String {
-        val bytes = Base64.decode(encoded, Base64.DEFAULT)
-        val buffer = ByteBuffer.wrap(bytes)
-        val ivSize = buffer.int
-        val iv = ByteArray(ivSize)
-        buffer.get(iv)
-        val cipherText = ByteArray(buffer.remaining())
-        buffer.get(cipherText)
+        return try {
+            val bytes = Base64.decode(encoded, Base64.DEFAULT)
+            val buffer = ByteBuffer.wrap(bytes)
+            val ivSize = buffer.int
+            val iv = ByteArray(ivSize)
+            buffer.get(iv)
+            val cipherText = ByteArray(buffer.remaining())
+            buffer.get(cipherText)
 
-        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-        cipher.init(Cipher.DECRYPT_MODE, getSecretKey(), GCMParameterSpec(128, iv))
-        val plainBytes = cipher.doFinal(cipherText)
-        return String(plainBytes, Charsets.UTF_8)
+            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+            cipher.init(Cipher.DECRYPT_MODE, getSecretKey(), GCMParameterSpec(128, iv))
+            val plainBytes = cipher.doFinal(cipherText)
+            String(plainBytes, Charsets.UTF_8)
+        } catch (e: Exception) {
+            Log.e("SessionManager", "Failed to decrypt session data", e)
+            throw e
+        }
     }
 
     fun UserSession.getPrefName(): String =
@@ -96,7 +116,7 @@ class SessionManager(private val context: Context) {
     fun getPrefName(did: String): String =
         keySession + did
 
-    fun saveSession(session: UserSession) {
+    override fun saveSession(session: UserSession) {
         val json = gson.toJson(session)
         val encrypted = encrypt(json)
         
@@ -113,7 +133,7 @@ class SessionManager(private val context: Context) {
 
     fun getSession(): UserSession? = getCurrentSession()
 
-    fun getCurrentSession(): UserSession? {
+    override fun getCurrentSession(): UserSession? {
         val currentDid = prefs.getString(currentDidKey, null)
         return if (currentDid != null) {
             getSession(currentDid)
@@ -155,13 +175,14 @@ class SessionManager(private val context: Context) {
                 session
             }
         } catch (e: Exception) {
-            Log.w("SessionManager", "Failed to load session; clearing.", e)
-            clearSession(did)
+            Log.w("SessionManager", "Failed to load session for $did", e)
+            // Don't clear immediately, it might be a transient KeyStore issue
+            // clearSession(did) 
             null
         }
     }
 
-    fun clearSession(did: String) {
+    override fun clearSession(did: String) {
         prefs.edit { remove(getPrefName(did)) }
         
         val dids = getLoggedInDids().toMutableList()
@@ -179,13 +200,13 @@ class SessionManager(private val context: Context) {
         }
     }
 
-    fun saveOAuthState(oauthState: OAuthState) {
-        val json = gson.toJson(oauthState)
+    override fun saveOAuthState(state: OAuthState) {
+        val json = gson.toJson(state)
         val encrypted = encrypt(json)
         prefs.edit { putString(keyOAuthState, encrypted) }
     }
 
-    fun getOAuthState(): OAuthState? {
+    override fun getOAuthState(): OAuthState? {
         val encrypted = prefs.getString(keyOAuthState, null) ?: return null
         return try {
             val decrypted = decrypt(encrypted)
@@ -197,18 +218,10 @@ class SessionManager(private val context: Context) {
         }
     }
 
-    fun clearOAuthState() {
+    override fun clearOAuthState() {
         prefs.edit { remove(keyOAuthState) }
     }
 
     private val prefs: SharedPreferences
         get() = context.getSharedPreferences(prefsName, Context.MODE_PRIVATE)
 }
-
-data class OAuthState(
-    val state: String,
-    val codeVerifier: String,
-    val authServerUrl: String,
-    val handle: String? = null,
-    val did: String? = null
-)

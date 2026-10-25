@@ -29,9 +29,11 @@ import com.ramcosta.composedestinations.annotation.Destination
 import com.ramcosta.composedestinations.annotation.RootGraph
 import com.ramcosta.composedestinations.generated.destinations.LoginDestination
 import com.ramcosta.composedestinations.navigation.DestinationsNavigator
-import io.github.turtlepaw.mindsky.R
-import io.github.turtlepaw.mindsky.auth.getPdsUrlFromDid
-import io.github.turtlepaw.mindsky.auth.resolveHandleToDid
+import fyi.kittens.shared.auth.getPdsUrlFromDid
+import fyi.kittens.shared.auth.resolveHandleToDid
+import fyi.kittens.shared.R
+import io.github.turtlepaw.mindsky.preferences.AppPrefs
+import io.github.turtlepaw.mindsky.preferences.LocalPreferences
 import io.github.turtlepaw.mindsky.routes.settings.TopAppBarCommon
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.okhttp.OkHttp
@@ -57,7 +59,15 @@ enum class ConnectionState {
 fun CustomPds(navigator: DestinationsNavigator, isOnboarding: Boolean = true) {
     val viewModel = rememberOnboardingViewModel()
 
+    val prefs = LocalPreferences.current
     var input by remember { mutableStateOf("") }
+    LaunchedEffect(Unit) {
+        input = prefs.get(AppPrefs.PdsInput)
+    }
+    LaunchedEffect(input) {
+        prefs.set(AppPrefs.PdsInput, input)
+    }
+
     var isConnected by remember { mutableStateOf(ConnectionState.Idle) }
 
     val coroutineScope = rememberCoroutineScope()
@@ -196,21 +206,9 @@ fun CustomPds(navigator: DestinationsNavigator, isOnboarding: Boolean = true) {
                     .align(Alignment.BottomCenter),
                 enabled = isConnected == ConnectionState.Connected,
                 onClick = {
-                    when (isConnected) {
-                        ConnectionState.Connected -> {
-                            navigator.navigate(
-                                LoginDestination(viewModel.pds, isOnboarding)
-                            )
-                        }
-
-                        ConnectionState.Idle, ConnectionState.Failed -> {
-                            // Do nothing, just show the current state
-                        }
-
-                        ConnectionState.Connecting -> {
-                            // Already connecting, do nothing
-                        }
-                    }
+                    navigator.navigate(
+                        LoginDestination(viewModel.pds, isOnboarding)
+                    )
                 }
             ) {
                 when (isConnected) {

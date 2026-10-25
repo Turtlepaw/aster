@@ -2,7 +2,6 @@ package io.github.turtlepaw.mindsky.routes
 
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -17,24 +16,20 @@ import androidx.compose.ui.Modifier
 import kotlinx.coroutines.launch
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import androidx.core.net.toUri
 import app.bsky.feed.FeedViewPost
-import app.bsky.feed.Generator
 import app.bsky.feed.GeneratorView
 import app.bsky.feed.GetFeedGeneratorQueryParams
-import app.bsky.feed.GetFeedGeneratorResponse
 import app.bsky.feed.GetFeedQueryParams
-import app.bsky.feed.GetFeedResponse
 import com.ramcosta.composedestinations.annotation.Destination
 import com.ramcosta.composedestinations.annotation.RootGraph
 import com.ramcosta.composedestinations.generated.destinations.FullsizePostDestination
 import com.ramcosta.composedestinations.navigation.DestinationsNavigator
 import io.github.turtlepaw.fetch_and_cache.Cache
 import io.github.turtlepaw.fetch_and_cache.InfiniteCache
-import io.github.turtlepaw.fetch_and_cache.InfiniteLoadResult
-import io.github.turtlepaw.mindsky.components.Avatar
+import fyi.kittens.shared.ui.Avatar
+import fyi.kittens.shared.ui.LoadMore
 import io.github.turtlepaw.mindsky.components.post.PostComponent
-import io.github.turtlepaw.mindsky.components.post.PostDensity
+import fyi.kittens.shared.ui.PostDensity
 import io.github.turtlepaw.mindsky.di.LocalMindskyApi
 import io.github.turtlepaw.mindsky.routes.settings.TopAppBarCommon
 import sh.christian.ozone.api.AtUri

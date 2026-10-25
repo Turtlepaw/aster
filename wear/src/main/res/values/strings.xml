@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">Petal</string>
+    <string name="hello_world">Hello, %1$s!</string>
+    <string name="not_signed_in">Not signed in</string>
+</resources>

@@ -21,9 +21,11 @@ import app.bsky.feed.GetActorLikesQueryParams
 import app.bsky.feed.GetActorLikesResponse
 import app.bsky.feed.Post
 import io.github.turtlepaw.mindsky.auth.SessionManager
-import io.github.turtlepaw.mindsky.auth.UserSession
+import fyi.kittens.shared.auth.UserSession
 import io.github.turtlepaw.mindsky.db.Engagement
 import io.github.turtlepaw.mindsky.db.EngagementType
+import io.github.turtlepaw.mindsky.db.Engagement_
+import io.github.turtlepaw.mindsky.logic.EmbedderHolder
 import io.github.turtlepaw.mindsky.logic.PostEmbedder
 import io.github.turtlepaw.mindsky.logic.ranking.InterestCluster
 import io.github.turtlepaw.mindsky.logic.ranking.InterestClusterer
@@ -104,19 +106,19 @@ class SignalProcessingWorker(
         )
     }
 
-    private fun initializeLikeData(box: Box<Engagement>): Pair<MutableList<Engagement>, MutableSet<String>> {
+    private fun initializeLikeData(box: Box<Engagement>, userDid: String): Pair<MutableList<Engagement>, MutableSet<String>> {
         if (isTimeRunningOut()) {
             Log.w(logTag, "Time running out during initialization")
             return Pair(mutableListOf(), mutableSetOf())
         }
 
         val allLikes = mutableListOf<Engagement>()
-        val existingLikes = box.all
+        val existingLikes = box.query(Engagement_.userDid.equal(userDid)).build().use { it.find() }
         allLikes.addAll(existingLikes)
         val knownUris = mutableSetOf<String>().apply {
             addAll(allLikes.map { it.uri })
         }
-        Log.d(logTag, "Initialized like data. Found ${existingLikes.size} existing likes.")
+        Log.d(logTag, "Initialized like data. Found ${existingLikes.size} existing likes for user $userDid.")
         logTimeStatus("After initialization")
         return Pair(allLikes, knownUris)
     }
@@ -149,7 +151,8 @@ class SignalProcessingWorker(
         likeViewsToProcess: List<FeedViewPost>,
         box: Box<Engagement>,
         knownUris: MutableSet<String>,
-        postEmbedder: PostEmbedder = PostEmbedder(appContext),
+        userDid: String,
+        postEmbedder: PostEmbedder = EmbedderHolder.get(appContext),
         onProgress: (Int) -> Unit
     ): List<Engagement> {
         if (likeViewsToProcess.isEmpty() || isTimeRunningOut()) {
@@ -192,6 +195,7 @@ class SignalProcessingWorker(
 
                 val vector = postEmbedder.encode(post.text)
                 val newVector = Engagement(
+                    userDid = userDid,
                     uri = likeView.post.uri.atUri,
                     cid = likeView.post.cid.cid,
                     createdAt = post.createdAt.epochSeconds,
@@ -208,7 +212,7 @@ class SignalProcessingWorker(
                 onProgress((i * 100) / postsToProcess.coerceAtLeast(1))
 
                 // Adaptive delay based on remaining time
-                val adaptiveDelay = if (getRemainingTime() > 120_000L) 2_000L else 1_000L
+                val adaptiveDelay = if (getRemainingTime() > 120_000L) 300L else 150L //if (getRemainingTime() > 120_000L) 2_000L else 1_000L
                 delay(adaptiveDelay)
 
             } catch (e: Exception) {
@@ -351,9 +355,8 @@ class SignalProcessingWorker(
                 }
 
                 val (allLikesFromDb, knownUris) = initializeLikeData(
-                    objectBoxStore.boxFor(
-                        Engagement::class.java
-                    )
+                    objectBoxStore.boxFor(Engagement::class.java),
+                    session.did
                 )
 
                 if (isTimeRunningOut()) {
@@ -383,7 +386,9 @@ class SignalProcessingWorker(
                     likedPosts,
                     objectBoxStore.boxFor(Engagement::class.java),
                     knownUris,
-                    onProgress = getProgressCallback(Stage.PROCESSING_LIKES)
+                    userDid = session.did,
+                    onProgress = getProgressCallback(Stage.PROCESSING_LIKES),
+                    postEmbedder = EmbedderHolder.get(appContext)
                 )
 
                 val allLikes = allLikesFromDb + allProcessedLikes
@@ -392,7 +397,10 @@ class SignalProcessingWorker(
                 if (allLikes.isNotEmpty()) {
                     Log.d(logTag, "Creating interest clusters...")
                     val clusterer = InterestClusterer()
-                    val userProfile = clusterer.createClusters(allLikes)
+                    val userProfile = clusterer.createClusters(
+                        likedPosts = allLikes,
+                        postEmbedder = EmbedderHolder.get(appContext)
+                    )
 
                     // Store clusters
                     objectBoxStore.boxFor(InterestCluster::class.java)

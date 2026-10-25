@@ -275,7 +275,11 @@ fun MindskyTheme(
     val useCatppuccin by rememberPreference(AppPrefs.UseCatppuccinTheme)
     val catppuccinVariant by rememberPreference(AppPrefs.CatppuccinVariant)
     val catppuccinAccent by rememberPreference(AppPrefs.CatppuccinAccent)
-    
+    val appFont by rememberPreference(AppPrefs.Font)
+    val appFontWeight by rememberPreference(AppPrefs.FontWeight)
+    val appFontWidth by rememberPreference(AppPrefs.FontWidth)
+    val appFontRoundness by rememberPreference(AppPrefs.FontRoundness)
+
     val preferences = LocalPreferences.current
     val colorScheme = when {
         useCatppuccin -> {
@@ -313,7 +317,7 @@ fun MindskyTheme(
 
     MaterialTheme(
         colorScheme = colorScheme,
-        typography = Typography().withFontFamily(default),
+        typography = Typography().withFontFamily(getFontFamily(appFont, appFontWeight, appFontWidth, appFontRoundness)),
         content = content
     )
 }

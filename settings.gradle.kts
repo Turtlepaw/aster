@@ -1,9 +1,3 @@
-import org.gradle.kotlin.dsl.flatDir
-
-include(":fetch_and_cache")
-
-
-
 pluginManagement {
     resolutionStrategy {
         eachPlugin {
@@ -38,4 +32,7 @@ dependencyResolutionManagement {
 
 rootProject.name = "Mindsky"
 include(":app")
+include(":wear")
+include(":shared")
+include(":fetch_and_cache")
 includeBuild("ozone")

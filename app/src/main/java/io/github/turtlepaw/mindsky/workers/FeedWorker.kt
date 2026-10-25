@@ -15,16 +15,23 @@ import app.bsky.feed.FeedViewPost
 import app.bsky.feed.GetFeedQueryParams
 import app.bsky.feed.GetTimelineQueryParams
 import app.bsky.feed.Post
+import app.bsky.feed.SearchPostsQueryParams
+import app.bsky.feed.SearchPostsSort
 import io.github.turtlepaw.mindsky.auth.SessionManager
 import io.github.turtlepaw.mindsky.db.EmbeddedPost
 import io.github.turtlepaw.mindsky.db.Engagement
+import io.github.turtlepaw.mindsky.db.Engagement_
 import io.github.turtlepaw.mindsky.db.ObjectBox
-import io.github.turtlepaw.mindsky.logic.FeedTuner
+import fyi.kittens.shared.FeedTuner
+import io.github.turtlepaw.mindsky.logic.EmbedderHolder
 import io.github.turtlepaw.mindsky.logic.PostEmbedder
+import io.github.turtlepaw.mindsky.logic.ranking.ClusterKeywords
 import io.github.turtlepaw.mindsky.logic.ranking.InterestCluster
 import io.github.turtlepaw.mindsky.logic.ranking.MultiInterestUserProfile
 import io.github.turtlepaw.mindsky.logic.ranking.PostRanker
 import io.github.turtlepaw.mindsky.logic.ranking.PostScore
+import io.github.turtlepaw.mindsky.logic.ranking.PostScore_
+import io.objectbox.Box
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -57,7 +64,7 @@ class FeedWorker(
         private const val PROCESSING_BATCH_SIZE = 50
 
         private const val TEN_MINUTES_MS = 10 * 60 * 1000L // 10 minutes in milliseconds
-        private const val MIN_INTER_EMBEDDING_DELAY_MS = 3000L // Just over 2 seconds
+        private const val MIN_INTER_EMBEDDING_DELAY_MS = 1500L // Just over 2 seconds
 
         private fun createNotificationChannel(context: Context) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -263,6 +270,73 @@ class FeedWorker(
         return@withContext combinedFeed
     }
 
+    private suspend fun getInterestSearchPosts(
+        api: BlueskyApi,
+        keywordsByCluster: Map<Long, List<String>>,
+        maxQueries: Int = 8,
+        postsPerQuery: Long = 40,
+        onProgress: suspend (done: Int, total: Int) -> Unit
+    ): List<FeedViewPost> = withContext(Dispatchers.IO) {
+
+        // Interleave across clusters so one dominant interest doesn't eat every query slot
+        val queries = interleave(keywordsByCluster.values.toList()).take(maxQueries)
+        val results = mutableListOf<FeedViewPost>()
+
+        for ((i, term) in queries.withIndex()) {
+            if (isStopped) break
+            onProgress(i, queries.size)
+
+            val response = try {
+                api.searchPosts(
+                    SearchPostsQueryParams(
+                        q = term,
+                        limit = postsPerQuery,
+                        sort = SearchPostsSort.Latest   // drop or switch to "top" if the enum differs in your Ozone version
+                    )
+                ).maybeResponse()
+            } catch (e: Exception) {
+                Log.e("FeedWorker", "searchPosts failed for '$term'", e)
+                delay(WorkerCommon.THERMAL_COOLDOWN_MS)
+                continue
+            }
+
+            response?.posts?.let { posts ->
+                // searchPosts returns PostView, not FeedViewPost — wrap to match your pipeline
+                results.addAll(posts.map { FeedViewPost(post = it, reply = null, reason = null) })
+                Log.d("FeedWorker", "Search '$term' → ${posts.size} posts")
+            }
+
+            delay(WorkerCommon.THERMAL_COOLDOWN_MS)
+        }
+
+        onProgress(queries.size, queries.size)
+        results
+    }
+
+    private fun <T> interleave(lists: List<List<T>>): List<T> {
+        val out = mutableListOf<T>()
+        var idx = 0
+        while (lists.any { idx < it.size }) {
+            lists.forEach { if (idx < it.size) out.add(it[idx]) }
+            idx++
+        }
+        return out
+    }
+
+    private fun cosineSimilarity(a: FloatArray, b: FloatArray): Double {
+        if (a.isEmpty() || b.isEmpty() || a.size != b.size) return 0.0
+        var dotProduct = 0.0
+        var normA = 0.0
+        var normB = 0.0
+        for (i in a.indices) {
+            dotProduct += a[i] * b[i]
+            normA += a[i] * a[i]
+            normB += b[i] * b[i]
+        }
+        if (normA == 0.0 || normB == 0.0) return 0.0
+        return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB))
+    }
+
     override suspend fun doWork(): Result = coroutineScope {
         val startTimeMillis = System.currentTimeMillis()
 
@@ -312,7 +386,7 @@ class FeedWorker(
 
 
                 val postEmbedder = try {
-                    PostEmbedder(appContext)
+                    EmbedderHolder.get(appContext)
                 } catch (e: Exception) {
                     Log.e("FeedWorker", "Failed to initialize PostEmbedder", e)
                     return@coroutineScope Result.failure()
@@ -390,7 +464,32 @@ class FeedWorker(
                 }
                 updateProgressNotification(WorkStage.FETCHING_DISCOVERY, 100, indeterminate = false)
 
-                val totalPostsToProcess = familiarFeed.size
+                val postScoreBox = objectBox.boxFor(PostScore::class.java)
+                val engagementBox = objectBox.boxFor(Engagement::class.java)
+                val interestCluster = objectBox.boxFor(InterestCluster::class.java)
+                val allInterestClusters = interestCluster.all
+                val allEngagements = engagementBox.query(Engagement_.userDid.equal(currentSession.did)).build().use { it.find() }
+
+                val engagementsByCluster = if (allInterestClusters.isNotEmpty()) {
+                    allEngagements.groupBy { engagement ->
+                        allInterestClusters.maxByOrNull { cluster ->
+                            cosineSimilarity(engagement.embedding, cluster.centerEmbedding)
+                        }?.id ?: 0L
+                    }
+                } else {
+                    mapOf(0L to allEngagements)
+                }
+                val keywordsByCluster = ClusterKeywords.extractPerCluster(engagementsByCluster)
+                Log.i("FeedWorker", "Cluster keywords: $keywordsByCluster")
+
+                val searchPosts = getInterestSearchPosts(api, keywordsByCluster) { done, total ->
+                    val pct = if (total > 0) done * 100 / total else 100
+                    updateProgressNotification(WorkStage.FETCHING_DISCOVERY, pct, indeterminate = false)
+                }
+
+                val allCandidates = (familiarFeed + searchPosts).distinctBy { it.post.uri }.filterNot { it.reply != null }
+
+                val totalPostsToProcess = allCandidates.size
                 Log.i("FeedWorker", "Total posts to process: $totalPostsToProcess")
                 updateProgressNotification(
                     WorkStage.PROCESSING_POSTS,
@@ -398,18 +497,11 @@ class FeedWorker(
                     indeterminate = totalPostsToProcess == 0
                 )
 
-                val postScoreBox = objectBox.boxFor(PostScore::class.java)
-                val engagementBox = objectBox.boxFor(Engagement::class.java)
-                val interestCluster = objectBox.boxFor(InterestCluster::class.java)
-                val allInterestClusters = interestCluster.all
-                val allEngagements = engagementBox.all
-
-                postScoreBox.removeAll()
-                Log.i("FeedWorker", "Cleared existing PostScore data.")
-
+                val userProfile = MultiInterestUserProfile.fromInterestClusters(allInterestClusters)
+                val engagementsByAuthor = allEngagements.groupBy { it.authorDid }
                 val batchToStore = mutableListOf<PostScore>()
 
-                for ((globalIndex, feedViewPost) in familiarFeed.withIndex()) {
+                for ((globalIndex, feedViewPost) in allCandidates.withIndex()) {
                     if (isStopped) {
                         Log.i("FeedWorker", "doWork: Worker stopped during post processing loop.")
                         if (batchToStore.isNotEmpty()) {
@@ -420,6 +512,13 @@ class FeedWorker(
                             }
                         }
                         return@coroutineScope Result.failure()
+                    }
+
+                    val viewer = feedViewPost.post.viewer
+                    val alreadyEngaged = viewer?.like != null || viewer?.repost != null
+
+                    if (alreadyEngaged) {
+                        continue  // skip embedding + scoring entirely — cheap check, big compute savings
                     }
 
                     if (System.currentTimeMillis() - startTimeMillis >= TEN_MINUTES_MS) {
@@ -465,16 +564,17 @@ class FeedWorker(
                             )
                             val score = PostRanker.scorePost(
                                 embeddedPost,
-                                MultiInterestUserProfile.fromInterestClusters(allInterestClusters),
-                                allEngagements
-                            )
+                                userProfile,
+                                engagementsByAuthor
+                            ).copy(lastSeenAt = System.currentTimeMillis())
+
                             batchToStore.add(score)
                         }
                     } catch (e: Exception) {
                         Log.e("FeedWorker", "Error processing post ${feedViewPost.post.uri}", e)
                     }
 
-                    if (batchToStore.size >= PROCESSING_BATCH_SIZE || globalIndex == familiarFeed.size - 1) {
+                    if (batchToStore.size >= PROCESSING_BATCH_SIZE || globalIndex == allCandidates.size - 1) {
                         if (batchToStore.isNotEmpty()) {
                             try {
                                 val sortedBatch =
@@ -503,7 +603,7 @@ class FeedWorker(
                         }
                     }
 
-                    if (performedEmbeddingCycle && globalIndex < familiarFeed.size - 1) {
+                    if (performedEmbeddingCycle && globalIndex < allCandidates.size - 1) {
                         if (!isStopped && (System.currentTimeMillis() - startTimeMillis < TEN_MINUTES_MS)) {
                             delay(MIN_INTER_EMBEDDING_DELAY_MS)
                         }
@@ -511,6 +611,7 @@ class FeedWorker(
                 }
 
                 updateProgressNotification(WorkStage.UPDATING_DATABASE, 100, indeterminate = false)
+                pruneStalePostScores(postScoreBox)
                 updateProgressNotification(WorkStage.COMPLETE, 100)
                 Log.i("FeedWorker", "doWork: Sync completed successfully.")
                 Result.success()
@@ -539,5 +640,13 @@ class FeedWorker(
                 }
             }
         }
+    }
+
+    private fun pruneStalePostScores(box: Box<PostScore>) {
+        val cutoff = System.currentTimeMillis() - (24 * 60 * 60 * 1000L) // tune retention window
+        val staleQuery = box.query(PostScore_.lastSeenAt.less(cutoff)).build()
+        val staleCount = staleQuery.remove()
+        staleQuery.close()
+        Log.i("FeedWorker", "Pruned $staleCount stale PostScore entries.")
     }
 }

@@ -1,34 +1,31 @@
 package io.github.turtlepaw.mindsky.routes
 
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
+import android.util.Log
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.MaterialTheme
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.QuestionMark
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.unit.dp
+import androidx.compose.ui.res.stringResource
 import app.bsky.actor.ProfileView
 import app.bsky.feed.GetLikesQueryParams
 import app.bsky.feed.GetRepostedByQueryParams
+import app.bsky.graph.GetFollowersQueryParams
+import app.bsky.graph.GetFollowsQueryParams
 import app.bsky.graph.GetKnownFollowersQueryParams
 import com.ramcosta.composedestinations.annotation.Destination
 import com.ramcosta.composedestinations.annotation.RootGraph
 import com.ramcosta.composedestinations.generated.destinations.ProfileDestination
-import com.ramcosta.composedestinations.generated.destinations.ProfileDestination.invoke
 import com.ramcosta.composedestinations.navigation.DestinationsNavigator
 import io.github.turtlepaw.fetch_and_cache.Cache
-import io.github.turtlepaw.mindsky.R
-import io.github.turtlepaw.mindsky.components.Avatar
+import fyi.kittens.shared.R
+import io.github.turtlepaw.fetch_and_cache.SingleCache
+import io.github.turtlepaw.mindsky.components.ErrorMessage
+import io.github.turtlepaw.mindsky.components.GenericTopBar
 import io.github.turtlepaw.mindsky.components.ProfileExpanded
 import io.github.turtlepaw.mindsky.di.LocalMindskyApi
 import io.github.turtlepaw.mindsky.routes.settings.TopAppBarCommon
@@ -44,7 +41,12 @@ sealed class UserListType {
 
     @Serializable
     data class Reposts(val uri: String) : UserListType()
-    data class FollowedBy(val actor: String) : UserListType()
+    @Serializable
+    data class KnownFollowers(val actor: String) : UserListType()
+    @Serializable
+    data class Followers(val actor: String) : UserListType()
+    @Serializable
+    data class Following(val actor: String) : UserListType()
 }
 
 @Destination<RootGraph>
@@ -56,9 +58,9 @@ fun UserList(
 ) {
     val context = LocalContext.current
     val api = LocalMindskyApi.current
-    val data = Cache<Any?, List<ProfileView>>(
+    val data = SingleCache<List<ProfileView>>(
         fetcher = {
-            when (type) {
+            val result = when (type) {
                 is UserListType.Likes -> {
                     api.getLikes(
                         GetLikesQueryParams(
@@ -77,46 +79,91 @@ fun UserList(
                     ).requireResponse().repostedBy
                 }
 
-                is UserListType.FollowedBy -> {
+                is UserListType.KnownFollowers -> {
                     api.getKnownFollowers(
                         GetKnownFollowersQueryParams(
                             actor = Did(type.actor),
                             limit = 50,
-
-                            )
+                        )
                     ).requireResponse().followers
                 }
+
+                is UserListType.Followers -> {
+                    api.getFollowers(
+                        GetFollowersQueryParams(
+                            actor = Did(type.actor),
+                            limit = 50,
+                        )
+                    ).requireResponse().followers
+                }
+
+                is UserListType.Following -> {
+                    api.getFollows(
+                        GetFollowsQueryParams(
+                            actor = Did(type.actor),
+                            limit = 50,
+                        )
+                    ).requireResponse().follows
+                }
+
+                else -> throw IllegalArgumentException("Unknown type: $type")
             }
+
+            Log.d("UserList", "Fetched ${result.size} items")
+
+            return@SingleCache result
         },
         serializer = ListSerializer(ProfileView.serializer()),
-        identifier = identifier,
-        context = context
-    ).load(Unit)
+        identifier = "${identifier}_$type",
+    ).load()
+
+    val listState = rememberLazyListState()
 
     Scaffold(
         topBar = {
-            TopAppBarCommon.withBack(
-                navigator,
-                title = when (type) {
-                    is UserListType.Likes -> R.string.likes
-                    is UserListType.Reposts -> R.string.reposts
-                    is UserListType.FollowedBy -> R.string.followers_known
-                }
+            GenericTopBar(
+                title = stringResource(
+                    when (type) {
+                        is UserListType.Likes -> R.string.likes
+                        is UserListType.Reposts -> R.string.reposts
+                        is UserListType.KnownFollowers -> R.string.followers_known
+                        is UserListType.Followers -> R.string.followers
+                        is UserListType.Following -> R.string.following
+                    }
+                ),
+                listState = null,
+                navigator = navigator
             )
         }
     ) { contentPadding ->
         LazyColumn(
-            contentPadding = contentPadding
+            contentPadding = contentPadding,
+            state = listState
         ) {
-            if(data.isLoading){
+            if (data.isLoading) {
                 Loading()
-            } else if(data.value != null) {
-                items(data.value!!){ actor ->
+            } else if (data.value != null) {
+                items(data.value!!) { actor ->
                     ProfileExpanded(actor) {
                         navigator.navigate(
                             ProfileDestination(
                                 actor.did.did
                             )
+                        )
+                    }
+                }
+            } else if (data.error != null) {
+                item {
+                    ErrorMessage(
+                        data.error.toString()
+                    )
+                }
+            } else {
+                item {
+                    ErrorMessage(R.string.no_data){
+                        Icon(
+                            imageVector = Icons.Rounded.QuestionMark,
+                            contentDescription = "Question mark"
                         )
                     }
                 }

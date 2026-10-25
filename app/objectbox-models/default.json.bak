@@ -186,7 +186,7 @@
     },
     {
       "id": "5:2719873245517424125",
-      "lastPropertyId": "9:1406941205228975159",
+      "lastPropertyId": "10:8263599983392292437",
       "name": "PostScore",
       "properties": [
         {
@@ -203,7 +203,9 @@
         {
           "id": "3:1099654328024124564",
           "name": "postUri",
-          "type": 9
+          "indexId": "1:1917047119689003984",
+          "type": 9,
+          "flags": 34848
         },
         {
           "id": "4:8336502991439013193",
@@ -234,6 +236,11 @@
           "id": "9:1406941205228975159",
           "name": "matchedInterest",
           "type": 9
+        },
+        {
+          "id": "10:8263599983392292437",
+          "name": "lastSeenAt",
+          "type": 6
         }
       ],
       "relations": []
@@ -307,59 +314,94 @@
       "relations": []
     },
     {
-      "id": "8:8615164724069648757",
-      "lastPropertyId": "7:5159208955256980775",
-      "name": "PostThreadEntity",
+      "id": "9:1136427013917885783",
+      "lastPropertyId": "12:177713235125199785",
+      "name": "Scrobble",
       "properties": [
         {
-          "id": "1:6901629477183829731",
+          "id": "1:7586304186323992870",
           "name": "id",
           "type": 6,
           "flags": 1
         },
         {
-          "id": "2:99146623818053432",
-          "name": "uri",
+          "id": "2:1759335797158344058",
+          "name": "userId",
           "type": 9
         },
         {
-          "id": "3:4695630430322606520",
-          "name": "postData",
+          "id": "3:5030400178783663763",
+          "name": "trackName",
           "type": 9
         },
         {
-          "id": "4:6306449247187367200",
-          "name": "parentUri",
+          "id": "4:1765758253116538552",
+          "name": "artistsJson",
           "type": 9
         },
         {
-          "id": "5:6405374321143515962",
-          "name": "depth",
-          "type": 5
+          "id": "5:7489686968404957255",
+          "name": "album",
+          "type": 9
         },
         {
-          "id": "6:7960328440549417543",
-          "name": "createdAt",
+          "id": "6:5823748717135074136",
+          "name": "albumArtUrl",
+          "type": 9
+        },
+        {
+          "id": "7:3208096688088721718",
+          "name": "recordingMbid",
+          "type": 9
+        },
+        {
+          "id": "8:2552810652755219873",
+          "name": "durationMs",
           "type": 6
         },
         {
-          "id": "7:5159208955256980775",
-          "name": "updatedAt",
+          "id": "9:7881153539480572037",
+          "name": "timestamp",
           "type": 6
+        },
+        {
+          "id": "10:2342517713763054909",
+          "name": "serviceUrl",
+          "type": 9
+        },
+        {
+          "id": "11:6414678507232971573",
+          "name": "syncedToPds",
+          "type": 1
+        },
+        {
+          "id": "12:177713235125199785",
+          "name": "pdsRecordUri",
+          "type": 9
         }
       ],
       "relations": []
     }
   ],
-  "lastEntityId": "8:8615164724069648757",
-  "lastIndexId": "0:0",
+  "lastEntityId": "9:1136427013917885783",
+  "lastIndexId": "1:1917047119689003984",
   "lastRelationId": "0:0",
   "lastSequenceId": "0:0",
   "modelVersion": 5,
   "modelVersionParserMinimum": 5,
-  "retiredEntityUids": [],
+  "retiredEntityUids": [
+    8615164724069648757
+  ],
   "retiredIndexUids": [],
-  "retiredPropertyUids": [],
+  "retiredPropertyUids": [
+    6901629477183829731,
+    99146623818053432,
+    4695630430322606520,
+    6306449247187367200,
+    6405374321143515962,
+    7960328440549417543,
+    5159208955256980775
+  ],
   "retiredRelationUids": [],
   "version": 1
 }

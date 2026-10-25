@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -30,14 +31,22 @@ import io.github.turtlepaw.mindsky.di.LocalSessionManager
 import me.zhanghai.compose.preference.preference
 
 import androidx.core.content.edit
+import io.github.turtlepaw.mindsky.components.MaterialList
+import io.github.turtlepaw.mindsky.components.MaterialListItem
+import io.github.turtlepaw.mindsky.db.ObjectBox
+import io.github.turtlepaw.mindsky.di.LocalLabelManager
+import io.github.turtlepaw.mindsky.di.LocalMindskyApi
+import io.github.turtlepaw.mindsky.logic.ranking.PostScore
+import io.objectbox.kotlin.boxFor
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Destination<RootGraph>
 @Composable
 fun DeveloperTools(navigator: DestinationsNavigator) {
     val context = LocalContext.current
     val sessionManager = LocalSessionManager.current
     val session by sessionManager.sessionFlow.collectAsState()
+    val api = LocalMindskyApi.current
 
     Scaffold(
         topBar = {
@@ -76,11 +85,15 @@ fun DeveloperTools(navigator: DestinationsNavigator) {
                         text = "PDS URL: ${session?.pdsUrl ?: "N/A"}",
                         style = MaterialTheme.typography.bodyMedium
                     )
-                    
+
                     Button(
                         onClick = {
-                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                            val clip = ClipData.newPlainText("Session Token", session?.accessToken ?: "No token")
+                            val clipboard =
+                                context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                            val clip = ClipData.newPlainText(
+                                "Session Token",
+                                session?.accessToken ?: "No token"
+                            )
                             clipboard.setPrimaryClip(clip)
                             Toast.makeText(context, "Token copied", Toast.LENGTH_SHORT).show()
                         },
@@ -102,33 +115,42 @@ fun DeveloperTools(navigator: DestinationsNavigator) {
             }
 
             item {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Button(
-                        onClick = {
-                            navigator.navigate(InitialOnboardingDestination)
-                        },
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text("Reset Onboarding")
-                    }
-
-                    Button(
-                        onClick = {
-                            context.getSharedPreferences("composer_drafts", Context.MODE_PRIVATE).edit {
-                                clear()
-                            }
-                            Toast.makeText(context, "Drafts cleared", Toast.LENGTH_SHORT).show()
-                        },
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text("Clear Local Drafts")
-                    }
-                }
+                val labelDefinitions = LocalLabelManager.current
+                MaterialList(
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                    items = listOf(
+                        MaterialListItem(
+                            onClick = {
+                                labelDefinitions.forceRefreshDefinitions(api)
+                            },
+                            title = "Refresh labeler definitions"
+                        ),
+                        MaterialListItem(
+                            onClick = {
+                                navigator.navigate(InitialOnboardingDestination(force = true))
+                            },
+                            title = "Reset Onboarding"
+                        ),
+                        MaterialListItem(
+                            onClick = {
+                                ObjectBox.store.boxFor(PostScore::class.java).removeAll()
+                            },
+                            title = "Clear for you feed"
+                        ),
+                        MaterialListItem(
+                            onClick = {
+                                context.getSharedPreferences(
+                                    "composer_drafts",
+                                    Context.MODE_PRIVATE
+                                ).edit {
+                                    clear()
+                                }
+                                Toast.makeText(context, "Drafts cleared", Toast.LENGTH_SHORT).show()
+                            },
+                            title = "Clear Local Drafts"
+                        )
+                    )
+                )
             }
         }
     }

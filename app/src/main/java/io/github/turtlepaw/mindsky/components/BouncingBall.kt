@@ -30,7 +30,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
-import io.github.turtlepaw.mindsky.R
+import fyi.kittens.shared.R
 import kotlinx.coroutines.isActive
 import kotlin.math.roundToInt
 

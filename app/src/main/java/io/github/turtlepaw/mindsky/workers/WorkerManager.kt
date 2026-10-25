@@ -110,7 +110,7 @@ object WorkerManager {
     fun WorkManager.getFeedWorkerRequest(
         delayMinutes: Long = 0
     ): OneTimeWorkRequest {
-        return buildOneTimeWorkRequest<FeedDiscoveryWorker>(delayMinutes)
+        return buildOneTimeWorkRequest<FeedWorker>(delayMinutes)
             .build()
     }
 

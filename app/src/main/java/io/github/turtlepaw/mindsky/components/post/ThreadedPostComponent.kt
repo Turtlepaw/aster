@@ -19,6 +19,7 @@ import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.unit.dp
 import app.bsky.feed.PostView
 import com.ramcosta.composedestinations.navigation.DestinationsNavigator
+import fyi.kittens.shared.ui.PostDensity
 
 /**
  * A post component that shows threading indicators for replies

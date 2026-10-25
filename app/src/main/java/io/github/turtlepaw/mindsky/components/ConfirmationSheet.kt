@@ -54,8 +54,7 @@ fun ConfirmationSheet(
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
                         text = title,
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold
+                        style = MaterialTheme.typography.titleLargeEmphasized,
                     )
                     if (description != null) {
                         Text(

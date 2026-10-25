@@ -7,14 +7,19 @@ import androidx.work.Configuration
 import coil3.ImageLoader
 import coil3.SingletonImageLoader
 import coil3.disk.directory
+import coil3.network.okhttp.OkHttpNetworkFetcherFactory
 import coil3.request.crossfade
-import io.github.turtlepaw.mindsky.auth.DPoPManager
-import io.github.turtlepaw.mindsky.auth.DpopAuthPlugin
-import io.github.turtlepaw.mindsky.auth.OAuthClient
+import coil3.util.Logger
+import fyi.kittens.shared.MindskyHttpClient
+import fyi.kittens.shared.auth.DPoPManager
+import fyi.kittens.shared.auth.DpopAuthPlugin
+import fyi.kittens.shared.auth.OAuthClient
 import io.github.turtlepaw.mindsky.auth.SessionManager
-import io.github.turtlepaw.mindsky.auth.UserSession
+import fyi.kittens.shared.auth.UserSession
+import io.github.turtlepaw.mindsky.auth.WearAuthManager
 import io.github.turtlepaw.mindsky.cache.LabelManager
 import io.github.turtlepaw.mindsky.db.ObjectBox
+import io.github.turtlepaw.mindsky.preferences.PreferenceManager
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.okhttp.OkHttp
 import io.ktor.client.plugins.HttpTimeout
@@ -28,6 +33,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import okhttp3.Headers
+import okhttp3.Interceptor
+import okhttp3.OkHttpClient
+import okhttp3.Response
 import sh.christian.ozone.BlueskyApi
 import sh.christian.ozone.XrpcBlueskyApi
 import io.ktor.client.plugins.logging.Logger as KtorLogger
@@ -38,9 +47,13 @@ class MindskyApplication : Application(), SingletonImageLoader.Factory/*, Config
 //            .setMinimumLoggingLevel(Log.DEBUG)
 //            .build()
 
-    private lateinit var sessionManager: SessionManager
+    lateinit var sessionManager: SessionManager
+        private set
+    private lateinit var wearAuthManager: WearAuthManager
     private var currentSession: UserSession? = null
     lateinit var labelManager: LabelManager
+        private set
+    lateinit var preferenceManager: PreferenceManager
         private set
 
     var hostUrl = MutableStateFlow<String>("https://bsky.social")
@@ -51,6 +64,19 @@ class MindskyApplication : Application(), SingletonImageLoader.Factory/*, Config
 
     val scope = CoroutineScope(Dispatchers.IO)
 
+    class RequestHeaderInterceptor : Interceptor {
+
+        override fun intercept(chain: Interceptor.Chain): Response {
+            val headers = Headers.Builder()
+                .set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
+                .build()
+            val request = chain.request().newBuilder()
+                .headers(headers)
+                .build()
+            return chain.proceed(request)
+        }
+    }
+
     override fun newImageLoader(context: Context): ImageLoader { // Coil setup
         return ImageLoader.Builder(context)
             .crossfade(true)
@@ -60,6 +86,17 @@ class MindskyApplication : Application(), SingletonImageLoader.Factory/*, Config
                     .maxSizeBytes(1024 * 1024 * 100)
                     .build()
             }
+            .components {
+                add(
+                    OkHttpNetworkFetcherFactory(
+                        callFactory = {
+                            OkHttpClient.Builder()
+                                .addInterceptor(RequestHeaderInterceptor())
+                                .build()
+                        },
+                    )
+                )
+            }
             .build()
     }
 
@@ -67,19 +104,27 @@ class MindskyApplication : Application(), SingletonImageLoader.Factory/*, Config
         super.onCreate()
         Log.d("MindskyApplication", "onCreate")
         ObjectBox.init(this) // Your ObjectBox initialization
+        preferenceManager = PreferenceManager(this)
         sessionManager = SessionManager(this)
+        wearAuthManager = WearAuthManager(this, sessionManager)
+        wearAuthManager.start()
         labelManager = LabelManager(this)
-        // postThreadRepository will be initialized in configureAuthenticatedApi
+        
+        // Load initial session immediately to avoid guest flash
+        val initialSession = sessionManager.getCurrentSession()
+        if (initialSession != null) {
+            configureAuthenticatedApi(initialSession)
+        }
 
         scope.launch {
-            sessionManager.sessionFlow.collect {
-                configureAuthenticatedApi(currentSession)
+            sessionManager.sessionFlow.collect { session ->
+                configureAuthenticatedApi(session)
             }
         }
     }
 
-    fun configureAuthenticatedApi(session: UserSession?) {
-        configureAuthenticatedApi(
+    fun configureAuthenticatedApi(session: UserSession?): BlueskyApi {
+        return configureAuthenticatedApi(
             session?.pdsUrl?.takeIf { it.isNotBlank() } ?: "https://bsky.social",
             session
         )
@@ -110,53 +155,26 @@ class MindskyApplication : Application(), SingletonImageLoader.Factory/*, Config
         )
 
         // Now, create the main client with the correct labelers
-        val httpClient = HttpClient(OkHttp) {
-            expectSuccess = false
-            install(HttpTimeout) {
-                requestTimeoutMillis = 30_000
-                connectTimeoutMillis = 30_000
-                socketTimeoutMillis = 30_000
+        val httpClient = MindskyHttpClient.create(
+            context = this,
+            sessionProvider = sessionManager,
+            hostUrlProvider = { hostUrl.value },
+            acceptLabelersProvider = {
+                val labels = labelManager.labelersFlow.value.takeIf { it.isNotEmpty() }?.joinToString(",")
+                Log.d("MindskyApplication", "Accept labelers: $labels")
+                labelManager.labelersFlow.value.takeIf { it.isNotEmpty() }?.joinToString(",")
             }
-            install(DpopAuthPlugin) {
-                sessionManager = this@MindskyApplication.sessionManager
-                oauthClient =
-                    OAuthClient(this@MindskyApplication, this@MindskyApplication.sessionManager)
-                dpopManager = DPoPManager.getInstance(this@MindskyApplication)
-            }
-            install(Logging) {
-                logger = object : KtorLogger {
-                    override fun log(message: String) {
-                        Log.v("Ktor_Authenticated", message)
-                    }
-                }
-                level = LogLevel.HEADERS
-            }
-
-            defaultRequest {
-                val currentHost = hostUrl.value
-                val parsedHost = io.ktor.http.Url(currentHost)
-
-                // Set the PDS host if no host is currently specified
-                if (url.host.isBlank() || url.host == "localhost") {
-                    url.protocol = parsedHost.protocol
-                    url.host = parsedHost.host
-                    url.port = parsedHost.port
-                }
-
-                val cachedLabelers = labelManager.labelersFlow.value
-                if (cachedLabelers.isNotEmpty()) {
-                    headers["atproto-accept-labelers"] = cachedLabelers.joinToString(",")
-                }
-            }
-        }
+        )
 
         val client = XrpcBlueskyApi(httpClient)
 
         this._blueskyApi.value = client
 
-        CoroutineScope(Dispatchers.IO).launch {
-            labelManager.preWarmDefinitions(client)
-            labelManager.revalidateLabelers(client)
+        if (session != null) {
+            CoroutineScope(Dispatchers.IO).launch {
+                labelManager.preWarmDefinitions(client)
+                labelManager.revalidateLabelers(client)
+            }
         }
 
         Log.i("MindskyApplication", "Authenticated API client configured for ${session?.handle}.")

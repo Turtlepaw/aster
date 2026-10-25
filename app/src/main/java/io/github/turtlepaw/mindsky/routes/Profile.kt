@@ -45,23 +45,23 @@ import app.bsky.feed.PostView
 import com.ramcosta.composedestinations.annotation.Destination
 import com.ramcosta.composedestinations.annotation.RootGraph
 import com.ramcosta.composedestinations.generated.destinations.FullsizePostDestination
-import com.ramcosta.composedestinations.generated.destinations.InitialOnboardingDestination
-import com.ramcosta.composedestinations.generated.destinations.LoginDestination
 import com.ramcosta.composedestinations.navigation.DestinationsNavigator
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import com.ramcosta.composedestinations.generated.destinations.PdsListDestination
-import io.github.turtlepaw.mindsky.components.AccountSwitcherSheet
-import io.github.turtlepaw.mindsky.components.Avatar
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.font.FontWeight
+import io.github.turtlepaw.mindsky.components.sheets.AccountSheet
+import io.github.turtlepaw.mindsky.components.media.NowPlayingProfile
+import io.github.turtlepaw.mindsky.media.NowPlayingStore
+import fyi.kittens.shared.ui.Avatar
 import io.github.turtlepaw.mindsky.components.post.PostComponent
-import io.github.turtlepaw.mindsky.components.post.PostInsightsContext
 import io.github.turtlepaw.mindsky.db.Engagement
+import io.github.turtlepaw.mindsky.db.Engagement_
 import io.github.turtlepaw.mindsky.db.ObjectBox
 import io.github.turtlepaw.mindsky.di.LocalMindskyApi
 import io.github.turtlepaw.mindsky.di.LocalProfileModel
-import io.github.turtlepaw.mindsky.di.LocalSessionManager
 import io.github.turtlepaw.mindsky.di.LocalScrollToTop
-import io.github.turtlepaw.mindsky.replaceCurrent
-import io.github.turtlepaw.mindsky.routes.onboarding.PdsList
+import io.github.turtlepaw.mindsky.di.LocalSessionManager
 import io.github.turtlepaw.mindsky.utils.ApiUtils.fetchChunkedPosts
 import io.github.turtlepaw.mindsky.viewmodels.ProfileUiState
 import io.github.turtlepaw.mindsky.viewmodels.rememberAuthViewModel
@@ -73,6 +73,8 @@ import kotlinx.coroutines.launch
 fun MyProfile(navigator: DestinationsNavigator) {
     var likes by remember { mutableStateOf<List<Pair<Engagement?, PostView>>?>(null) }
     val api = LocalMindskyApi.current
+    val sessionManager = LocalSessionManager.current
+    val session by sessionManager.sessionFlow.collectAsState()
     val listState = rememberLazyListState()
     val scrollToTopHandler = LocalScrollToTop.current
     val coroutineScope = rememberCoroutineScope()
@@ -94,10 +96,16 @@ fun MyProfile(navigator: DestinationsNavigator) {
         }
     }
 
-    LaunchedEffect(api) {
+    LaunchedEffect(api, session) {
+        val currentDid = session?.did ?: return@LaunchedEffect
         val box = ObjectBox.store.boxFor(Engagement::class.java)
-        val all = box.all
-        Log.d("Profile", "Found ${all.size} likes")
+        // Fetch only the most recent 40 likes to avoid overloading the API and memory
+        val all = box.query(Engagement_.userDid.equal(currentDid))
+            .orderDesc(Engagement_.createdAt)
+            .build()
+            .find(0, 40)
+
+        Log.d("Profile", "Found ${all.size} likes (limited from total)")
         likes = api.fetchChunkedPosts(
             all.map { it to it.uri }
         )
@@ -106,14 +114,14 @@ fun MyProfile(navigator: DestinationsNavigator) {
     val profileModel = LocalProfileModel.current
     val profileUiState by profileModel.uiState.collectAsState()
     val authViewModel = rememberAuthViewModel()
+    val nowPlaying by NowPlayingStore.nowPlaying.collectAsState()
 
-    AccountSwitcherSheet(
+    AccountSheet(
         isOpen = isAccountSwitcherOpen,
-        onDismiss = { isAccountSwitcherOpen = false },
-        onAddAccount = {
+        onAccountSwitch = {
             isAccountSwitcherOpen = false
-            navigator.navigate(PdsListDestination(isOnboarding = false))
-        }
+        },
+        onDismiss = { isAccountSwitcherOpen = false }
     )
 
     Scaffold(
@@ -151,30 +159,51 @@ fun MyProfile(navigator: DestinationsNavigator) {
                         val profile = (profileUiState as ProfileUiState.Success).profile
                         Row(
                             modifier = Modifier
-                                .padding(16.dp)
+                                .padding(24.dp)
                                 .fillMaxWidth()
+                                .clip(MaterialTheme.shapes.large)
+                                .background(MaterialTheme.colorScheme.surfaceContainerHigh)
                                 .clickable {
                                     isAccountSwitcherOpen = true
-                                },
+                                }
+                                .padding(20.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(
-                                15.dp,
-                                Alignment.CenterHorizontally
+                                20.dp,
+                                Alignment.Start
                             )
                         ) {
                             Avatar(
-                                modifier = Modifier.size(50.dp),
+                                modifier = Modifier.size(64.dp),
                                 profile.avatar?.uri,
                                 "${profile.handle} avatar",
+                                clip = MaterialTheme.shapes.small
                             )
 
-                            Text(
-                                text = profile.displayName ?: profile.handle.handle,
-                                style = MaterialTheme.typography.headlineSmall,
-                            )
+                            Column {
+                                Text(
+                                    text = profile.displayName ?: profile.handle.handle,
+                                    style = MaterialTheme.typography.titleLarge,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = "@${profile.handle.handle}",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Text(
+                                    text = "Tap to switch account",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.padding(top = 4.dp)
+                                )
+                            }
                         }
                     }
                 }
+            }
+            item {
+                NowPlayingProfile(nowPlaying)
             }
             item {
                 Button(

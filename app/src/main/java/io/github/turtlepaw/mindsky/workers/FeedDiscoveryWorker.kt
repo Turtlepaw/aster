@@ -19,8 +19,10 @@ import app.bsky.unspecced.GetPopularFeedGeneratorsQueryParams
 import io.github.turtlepaw.mindsky.auth.SessionManager
 import io.github.turtlepaw.mindsky.db.EmbeddedPost
 import io.github.turtlepaw.mindsky.db.Engagement
+import io.github.turtlepaw.mindsky.db.Engagement_
 import io.github.turtlepaw.mindsky.db.ObjectBox
 import io.github.turtlepaw.mindsky.db.SuggestedFeed
+import io.github.turtlepaw.mindsky.logic.EmbedderHolder
 import io.github.turtlepaw.mindsky.logic.PostEmbedder
 import io.github.turtlepaw.mindsky.logic.ranking.InterestCluster
 import io.github.turtlepaw.mindsky.logic.ranking.MultiInterestUserProfile
@@ -163,7 +165,7 @@ class FeedDiscoveryWorker(
     }
 
     // Phase 1: Analyze existing clusters and create interest profiles
-    private suspend fun analyzeInterestClusters(): List<InterestProfile> = withContext(Dispatchers.IO) {
+    private suspend fun analyzeInterestClusters(userDid: String): List<InterestProfile> = withContext(Dispatchers.IO) {
         Log.i("FeedDiscoveryWorker", "Phase 1: Analyzing interest clusters...")
         updateProgressNotification(WorkStage.ANALYZING_CLUSTERS, 0, indeterminate = true)
 
@@ -174,7 +176,7 @@ class FeedDiscoveryWorker(
         val embeddedPostBox = objectBox.boxFor(Engagement::class.java)
 
         val allClusters = interestClusterBox.all
-        val allPosts = embeddedPostBox.all
+        val allPosts = embeddedPostBox.query(Engagement_.userDid.equal(userDid)).build().use { it.find() }
 
         Log.i("FeedDiscoveryWorker", "Found ${allClusters.size} existing clusters with ${allPosts.size} posts")
 
@@ -312,7 +314,7 @@ class FeedDiscoveryWorker(
 
         if (!hasTimeRemaining()) return@withContext emptyList()
 
-        val postEmbedder = PostEmbedder(appContext)
+        val postEmbedder = EmbedderHolder.get(appContext)
         val feedsWithSimilarity = mutableListOf<FeedWithSimilarity>()
 
         for ((index, feed) in feedCandidates.withIndex()) {
@@ -521,14 +523,15 @@ class FeedDiscoveryWorker(
                 updateProgressNotification(WorkStage.STARTING, 0, indeterminate = true)
 
                 val sessionManager = SessionManager(appContext)
-                if (sessionManager.getSession() == null) {
+                val session = sessionManager.getSession()
+                if (session == null) {
                     Log.e("FeedDiscoveryWorker", "No active session")
                     return Result.failure()
                 }
                 val api = WorkerCommon.getBlueskyApi(appContext)
 
                 // Phase 1: Analyze interest clusters
-                val interestProfiles = analyzeInterestClusters()
+                val interestProfiles = analyzeInterestClusters(session.did)
                 if (interestProfiles.isEmpty() || !hasTimeRemaining()) {
                     Log.w("FeedDiscoveryWorker", "No suitable interest profiles found or out of time")
                     updateProgressNotification(WorkStage.COMPLETE, 100)

@@ -27,23 +27,23 @@ import com.ramcosta.composedestinations.annotation.RootGraph
 import com.ramcosta.composedestinations.generated.destinations.FeedDestination
 import com.ramcosta.composedestinations.generated.destinations.PdsListDestination
 import com.ramcosta.composedestinations.navigation.DestinationsNavigator
-import io.github.turtlepaw.mindsky.auth.AuthState
+import fyi.kittens.shared.auth.AuthState
 import io.github.turtlepaw.mindsky.components.BouncingStar
 import io.github.turtlepaw.mindsky.replaceCurrent
 import io.github.turtlepaw.mindsky.viewmodels.rememberAuthViewModel
 
 @Destination<RootGraph>
 @Composable
-fun InitialOnboarding(navigator: DestinationsNavigator) {
+fun InitialOnboarding(navigator: DestinationsNavigator, force: Boolean = false) {
     val authViewModel = rememberAuthViewModel()
     val authState by authViewModel.authState.collectAsState()
 
     LaunchedEffect(authState) {
-        if (authState is AuthState.Authenticated) {
+        if (authState is AuthState.Authenticated && !force) {
             navigator.replaceCurrent(FeedDestination)
         }
     }
-    
+
     Scaffold { paddingValues ->
         Box(
             modifier = Modifier
@@ -73,7 +73,7 @@ fun InitialOnboarding(navigator: DestinationsNavigator) {
                     Spacer(modifier = Modifier.height(12.dp))
 
                     Text(
-                        "Welcome to Mindsky. Your Bluesky feed powered by on-device AI.",
+                        "Welcome to Aster. Your Bluesky feed powered by on-device AI.",
                         style = MaterialTheme.typography.bodyLarge,
                         overflow = TextOverflow.Ellipsis
                     )
@@ -98,7 +98,7 @@ fun InitialOnboarding(navigator: DestinationsNavigator) {
                     contentAlignment = Alignment.CenterEnd
                 ) {
                     Button(onClick = {
-                        navigator.navigate(PdsListDestination())
+                        navigator.navigate(PdsListDestination(isOnboarding = true))
                     }) {
                         Text("Get Started")
                     }

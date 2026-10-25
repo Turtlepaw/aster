@@ -5,7 +5,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -18,9 +17,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.bsky.actor.ProfileView
-import com.ramcosta.composedestinations.generated.destinations.ProfileDestination
-import com.ramcosta.composedestinations.generated.destinations.ProfileDestination.invoke
-import io.github.turtlepaw.mindsky.components.post.Labelers
+import fyi.kittens.shared.ui.Avatar
 
 @Composable
 fun Profile(actor: ProfileView, onClick: () -> Unit) {

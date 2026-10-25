@@ -37,6 +37,7 @@ data class UserLikeVector(
 data class Engagement(
     @Id var id: Long = 0,
     // basic metadata
+    var userDid: String = "",
     var uri: String,
     var cid: String,
     var createdAt: Long,
@@ -66,6 +67,22 @@ data class SuggestedFeed(
     val matchedClusterId: Long,
     val contentFreshness: Float,
     val postFrequency: Float,
+)
+
+@Entity
+data class Scrobble(
+    @Id var id: Long = 0,
+    val userId: String,
+    val trackName: String,
+    val artistsJson: String,
+    val album: String?,
+    val albumArtUrl: String?,
+    val recordingMbid: String?,
+    val durationMs: Long,
+    val timestamp: Long,
+    val serviceUrl: String,
+    var syncedToPds: Boolean = false,
+    var pdsRecordUri: String? = null
 )
 
 enum class EngagementType {

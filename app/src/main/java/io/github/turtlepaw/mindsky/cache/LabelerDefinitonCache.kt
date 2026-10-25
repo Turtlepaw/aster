@@ -67,9 +67,10 @@ class LabelerDefCache(context: Context) {
 
     suspend fun getDefinitions(
         labelerDids: List<String>,
-        blueskyApi: BlueskyApi
+        blueskyApi: BlueskyApi,
+        allowCache: Boolean = true
     ): Map<String, GetServicesResponseViewUnion> {
-        val cached = _definitionsFlow.value
+        val cached = if(allowCache) _definitionsFlow.value else emptyMap()
         val missing = labelerDids.filter { it !in cached }
 
         if (missing.isEmpty()) {

@@ -71,10 +71,6 @@ class PostCache(private val context: Context) {
 
             Log.d("PostCache", "Cached post: ${post.uri.atUri}")
 
-            // Clean up old cache entries periodically
-            if (System.currentTimeMillis() % 10 == 0L) {
-                cleanupOldEntries()
-            }
 
         } catch (e: Exception) {
             Log.e("PostCache", "Error caching post: ${post.uri.atUri}", e)
@@ -269,21 +265,11 @@ class PostCache(private val context: Context) {
             val currentTime = System.currentTimeMillis()
             val files = cacheDir.listFiles() ?: return@withContext
 
-            // Remove expired files
+            // Remove expired files based on file metadata (much faster than reading content)
             files.filter { it.name.endsWith(".json") }.forEach { file ->
-                try {
-                    val jsonString = file.readText()
-                    val cacheEntry = json.decodeFromString<PostCacheEntry>(jsonString)
-
-                    if (currentTime - cacheEntry.timestamp > maxCacheAge ||
-                        cacheEntry.version < currentCacheVersion) {
-                        file.delete()
-                        Log.d("PostCache", "Deleted expired cache file: ${file.name}")
-                    }
-                } catch (e: Exception) {
-                    // If we can't read the file, delete it
+                if (currentTime - file.lastModified() > maxCacheAge) {
                     file.delete()
-                    Log.d("PostCache", "Deleted corrupted cache file: ${file.name}")
+                    Log.d("PostCache", "Deleted expired cache file: ${file.name}")
                 }
             }
 

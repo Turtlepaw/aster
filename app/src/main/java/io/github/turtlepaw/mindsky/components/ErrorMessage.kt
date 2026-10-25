@@ -9,19 +9,38 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import io.github.turtlepaw.mindsky.R
+import fyi.kittens.shared.R
 
 @Composable
-fun ErrorMessage(content: Int = R.string.failed_to_load) {
+fun ErrorMessage(content: Int = R.string.failed_to_load, icon: @Composable () -> Unit = {
+    Icon(
+        imageVector = Icons.Rounded.Warning,
+        contentDescription = "Warning"
+    )
+}) {
     Row(
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        Icon(
-            imageVector = Icons.Rounded.Warning,
-            contentDescription = "Warning"
-        )
+        icon()
         Text(
             stringResource(content)
+        )
+    }
+}
+
+@Composable
+fun ErrorMessage(content: String, icon: @Composable () -> Unit = {
+    Icon(
+        imageVector = Icons.Rounded.Warning,
+        contentDescription = "Warning"
+    )
+}) {
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        icon()
+        Text(
+            text = content
         )
     }
 }

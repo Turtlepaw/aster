@@ -1,7 +1,7 @@
 package io.github.turtlepaw.mindsky.routes.composer
 
 import android.content.ClipData
-import android.content. ClipboardManager
+import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.graphics.BitmapFactory
@@ -12,6 +12,7 @@ import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -20,14 +21,14 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
@@ -37,7 +38,8 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.Photo
-import androidx.compose.material.icons.filled.VideoCameraBack
+import androidx.compose.material.icons.filled.VideoSettings
+import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Edit
@@ -48,7 +50,6 @@ import androidx.compose.material3.CircularWavyProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FabPosition
-import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.HorizontalFloatingToolbar
 import androidx.compose.material3.Icon
@@ -63,6 +64,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.PlainTooltip
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TooltipBox
 import androidx.compose.material3.TooltipDefaults
 import androidx.compose.material3.TopAppBar
@@ -83,12 +85,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.asComposeRenderEffect
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
@@ -104,7 +105,7 @@ import com.ramcosta.composedestinations.annotation.Destination
 import com.ramcosta.composedestinations.annotation.RootGraph
 import com.ramcosta.composedestinations.navigation.DestinationsNavigator
 import com.ramcosta.composedestinations.navigation.EmptyDestinationsNavigator
-import io.github.turtlepaw.mindsky.R
+import fyi.kittens.shared.R
 import kotlinx.coroutines.guava.await
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
@@ -120,16 +121,27 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
-    import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
 import app.bsky.actor.ProfileViewBasic
 import app.bsky.actor.SearchActorsTypeaheadQueryParams
+import app.bsky.embed.AspectRatio
+import app.bsky.embed.Gallery
+import app.bsky.embed.GalleryImage
+import app.bsky.embed.GalleryItemUnion
 import app.bsky.embed.Images
 import app.bsky.embed.ImagesImage
+import app.bsky.embed.Record
+import app.bsky.embed.RecordViewRecord
+import app.bsky.embed.RecordWithMedia
+import app.bsky.embed.RecordWithMediaMediaUnion
+import app.bsky.embed.RecordWithMediaViewMediaUnion
 import app.bsky.embed.Video
 import app.bsky.feed.Post
 import app.bsky.feed.PostEmbedUnion
+import app.bsky.feed.PostLabelsUnion
+import app.bsky.feed.PostReplyRef
 import app.bsky.richtext.Facet
 import app.bsky.richtext.FacetByteSlice
 import app.bsky.richtext.FacetFeatureUnion
@@ -139,26 +151,34 @@ import app.bsky.video.GetJobStatusQueryParams
 import app.bsky.video.JobStatus
 import coil3.compose.AsyncImage
 import com.atproto.identity.ResolveHandleQueryParams
+import com.atproto.label.LabelValue
+import com.atproto.label.SelfLabel
+import com.atproto.label.SelfLabels
 import com.atproto.repo.CreateRecordRequest
-import com.atproto.repo.UploadBlobResponse
+import com.atproto.repo.StrongRef
 import com.atproto.server.GetServiceAuthQueryParams
 import com.google.mlkit.genai.common.FeatureStatus
 import com.google.mlkit.genai.imagedescription.ImageDescriberOptions
 import com.google.mlkit.genai.imagedescription.ImageDescription
 import com.google.mlkit.genai.imagedescription.ImageDescriptionRequest
-import io.github.turtlepaw.mindsky.auth.SessionManager
-import io.github.turtlepaw.mindsky.auth.UserSession
-import io.github.turtlepaw.mindsky.components.Avatar
+import fyi.kittens.shared.auth.UserSession
+import fyi.kittens.shared.ui.Avatar
+import fyi.kittens.shared.ui.DefaultPostStructureStyle
 import io.github.turtlepaw.mindsky.components.post.LoadingPost
 import io.github.turtlepaw.mindsky.preferences.AppPrefs
+import io.github.turtlepaw.mindsky.preferences.rememberPreference
 import io.github.turtlepaw.mindsky.components.post.PostComponent
-import io.github.turtlepaw.mindsky.components.post.PostDensity
+import fyi.kittens.shared.ui.PostDensity
+import fyi.kittens.shared.ui.embeds.EmbedStructure
+import fyi.kittens.shared.ui.embeds.EmbedStructureStyle
+import fyi.kittens.shared.ui.embeds.LocalEmbedStructureStyle
+import fyi.kittens.shared.ui.localizedName
+import io.github.turtlepaw.mindsky.components.ErrorMessage
+import io.github.turtlepaw.mindsky.components.post.embeds.QuotePost
 import io.github.turtlepaw.mindsky.di.LocalFeedModel
 import io.github.turtlepaw.mindsky.di.LocalMindskyApi
 import io.github.turtlepaw.mindsky.di.LocalSessionManager
 import io.github.turtlepaw.mindsky.routes.ProfileAvatar
-import io.github.turtlepaw.mindsky.routes.post.FullThreadDepth
-import io.github.turtlepaw.mindsky.routes.post.rememberThreadReplies
 import io.ktor.client.HttpClient
 import io.ktor.client.plugins.DefaultRequest
 import io.ktor.http.Url
@@ -172,7 +192,7 @@ import kotlinx.serialization.descriptors.PrimitiveSerialDescriptor
 import kotlinx.serialization.encoding.Decoder
 import kotlinx.serialization.encoding.Encoder
 import kotlinx.serialization.modules.SerializersModule
-import okhttp3.HttpUrl.Companion.toHttpUrl
+import me.zhanghai.compose.preference.CheckboxPreference
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -185,13 +205,13 @@ import kotlin.time.Clock
 import sh.christian.ozone.api.model.JsonContent.Companion.encodeAsJsonContent
 import sh.christian.ozone.BlueskyJson
 import sh.christian.ozone.XrpcBlueskyApi
+import sh.christian.ozone.api.AtUri
 import sh.christian.ozone.api.Language
+import sh.christian.ozone.api.Uri
 import sh.christian.ozone.api.model.Blob
-import sh.christian.ozone.api.xrpc.BSKY_SOCIAL
-import sh.christian.ozone.api.xrpc.defaultHttpClient
+import sh.christian.ozone.api.response.AtpResponse
 import sh.christian.ozone.api.xrpc.defaultHttpEngine
 import java.io.File
-import java.util.Date
 import kotlin.random.Random
 
 @Serializable
@@ -208,11 +228,22 @@ data class PostContent(
     val createdAt: Timestamp = Clock.System.now(),
     val images: List<ImageAttachment> = emptyList(),
     val video: ImageAttachment? = null,
-    val resolvedMentions: Map<String, Did> = emptyMap()
+    val resolvedMentions: Map<String, Did> = emptyMap(),
+    val quoteUri: AtUri? = null,
+    val selfLabels: List<LabelValue> = emptyList(),
 ) {
     fun isNotEmpty(): Boolean {
+        if (quoteUri != null) return true
         return text.isNotEmpty() || images.isNotEmpty() || video != null
     }
+
+    fun hasMedia(): Boolean {
+        return images.isNotEmpty() || video != null
+    }
+}
+
+fun PostEmbedUnion.isRecordLike(): Boolean {
+    return this is PostEmbedUnion.Record || this is PostEmbedUnion.RecordWithMedia
 }
 
 object AndroidUriSerializer : KSerializer<AndroidUri> {
@@ -227,7 +258,7 @@ object AndroidUriSerializer : KSerializer<AndroidUri> {
     }
 
     override fun deserialize(decoder: Decoder): AndroidUri {
-        return AndroidUri.parse(decoder.decodeString())
+        return decoder.decodeString().toUri()
     }
 }
 
@@ -301,7 +332,11 @@ class RichTextVisualTransformation(private val color: Color) : VisualTransformat
                 )
             }
             URL_REGEX.findAll(text.text).forEach { matchResult ->
-                if (mentionRanges.any { it.contains(matchResult.range.first) || it.contains(matchResult.range.last) }) {
+                if (mentionRanges.any {
+                        it.contains(matchResult.range.first) || it.contains(
+                            matchResult.range.last
+                        )
+                    }) {
                     return@forEach
                 }
                 addStyle(
@@ -363,7 +398,7 @@ fun calculateFacets(text: String, resolvedMentions: Map<String, Did>): List<Face
                 features = listOf(
                     FacetFeatureUnion.Link(
                         FacetLink(
-                            sh.christian.ozone.api.Uri(
+                            Uri(
                                 if (url.startsWith("http")) url else "https://$url"
                             )
                         )
@@ -395,7 +430,7 @@ suspend fun uploadVideo(
 ): Blob? {
     val auth = api.getServiceAuth(
         GetServiceAuthQueryParams(
-            aud = Did("did:web:${session.pdsUrl.toUri().host}"),
+            aud = "did:web:${session.pdsUrl.toUri().host}",
             lxm = Nsid("com.atproto.repo.uploadBlob"),
             exp = Clock.System.now().epochSeconds + 60 * 30, // 30 minutes
         )
@@ -498,17 +533,74 @@ fun AndroidUri.toFile(context: Context): File {
 }
 
 @androidx.annotation.OptIn(UnstableApi::class)
+@Composable
+fun MediaPreview(
+    uri: AndroidUri,
+    modifier: Modifier = Modifier,
+    contentScale: ContentScale = ContentScale.Fit,
+    isPaused: Boolean = false
+) {
+    val context = LocalContext.current
+    val isVideo = remember(uri) {
+        context.contentResolver.getType(uri)?.startsWith("video") == true
+    }
+
+    if (isVideo) {
+        val player = remember(uri) { ExoPlayer.Builder(context).build() }
+
+        LaunchedEffect(isPaused) {
+            if (isPaused) player.pause() else player.play()
+        }
+
+        DisposableEffect(uri) {
+            val mediaItem = MediaItem.fromUri(uri)
+            player.setMediaItem(mediaItem)
+            player.prepare()
+            player.playWhenReady = !isPaused
+            player.repeatMode = ExoPlayer.REPEAT_MODE_ALL
+
+            onDispose {
+                player.release()
+            }
+        }
+
+        AndroidView(
+            factory = { ctx ->
+                PlayerView(ctx).apply {
+                    resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
+                    this.player = player
+                    useController = false
+                }
+            },
+            modifier = modifier
+        )
+    } else {
+        AsyncImage(
+            model = uri,
+            contentDescription = null,
+            contentScale = contentScale,
+            modifier = modifier
+        )
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 @Destination<RootGraph>
 @Composable
-fun Composer(navigator: DestinationsNavigator, postUri: String? = null) {
-    val contentState = rememberComposerState(postUri)
+fun Composer(
+    navigator: DestinationsNavigator,
+    replyUri: String? = null,
+    targetQuoteUri: String? = null
+) {
+    val contentState = rememberComposerState(
+        target = replyUri
+    )
     var content by contentState
     val primaryColor = MaterialTheme.colorScheme.primary
     val context = LocalContext.current
     val api = LocalMindskyApi.current
     val session by LocalSessionManager.current.sessionFlow.collectAsState()
-    val developerMode by AppPrefs.DeveloperMode.stateFlow.collectAsState()
+    val developerMode by rememberPreference(AppPrefs.DeveloperMode)
     val scope = rememberCoroutineScope()
 
     var textFieldValue by remember {
@@ -518,23 +610,30 @@ fun Composer(navigator: DestinationsNavigator, postUri: String? = null) {
     var mentionSuggestions by remember { mutableStateOf<List<ProfileViewBasic>>(emptyList()) }
     var mentionQuery by remember { mutableStateOf<String?>(null) }
 
+    LaunchedEffect(targetQuoteUri) {
+        if (targetQuoteUri != null) {
+            val quoteUri = AtUri(targetQuoteUri)
+            content = content?.copy(quoteUri = quoteUri)
+        }
+    }
+
     LaunchedEffect(textFieldValue.text) {
         val text = textFieldValue.text
         val selection = textFieldValue.selection.start
-        
+
         if (selection > 0) {
             val textBeforeCursor = text.substring(0, selection)
             val lastAtIndex = textBeforeCursor.lastIndexOf('@')
-            if (lastAtIndex != -1) {
+            mentionQuery = if (lastAtIndex != -1) {
                 val query = textBeforeCursor.substring(lastAtIndex + 1)
                 // Only trigger if there's no space between @ and cursor
                 if (!query.contains(' ')) {
-                    mentionQuery = query
+                    query
                 } else {
-                    mentionQuery = null
+                    null
                 }
             } else {
-                mentionQuery = null
+                null
             }
         } else {
             mentionQuery = null
@@ -543,7 +642,7 @@ fun Composer(navigator: DestinationsNavigator, postUri: String? = null) {
 
     LaunchedEffect(mentionQuery) {
         val query = mentionQuery
-        if (query == null || query.length < 1) {
+        if (query.isNullOrEmpty()) {
             mentionSuggestions = emptyList()
             return@LaunchedEffect
         }
@@ -564,10 +663,16 @@ fun Composer(navigator: DestinationsNavigator, postUri: String? = null) {
     var editingAltTextImageIndex by remember { mutableStateOf<Int?>(null) }
     var videoUploadProgress by remember { mutableStateOf<Long?>(null) }
 
-    // Registers a photo picker activity launcher in multi-select mode.
-// In this example, the app lets the user select up to 5 media files.
+    var isMediaSettingsOpen by remember { mutableStateOf(false) }
+
+    val feedModel = LocalFeedModel.current
+    val replyPost = if (replyUri != null) feedModel.usePost(replyUri) else null
+    val quotePost =
+        if (content?.quoteUri != null) feedModel.usePost(content!!.quoteUri!!.atUri) else null
+
+    val maxPhotos = 10 - (content?.images?.size ?: 0)
     val pickMultipleMedia =
-        rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(4)) { uris ->
+        rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(maxPhotos)) { uris ->
             // Callback is invoked after the user selects media items or closes the
             // photo picker.
             if (uris.isNotEmpty()) {
@@ -588,10 +693,16 @@ fun Composer(navigator: DestinationsNavigator, postUri: String? = null) {
                     context.contentResolver.getType(it)?.startsWith("video") ?: false
                 }
                 if (hasVideo) {
-                    if(uris.size != 1) Toast.makeText(context, "Only one video allowed", Toast.LENGTH_SHORT).show()
+                    if (uris.size != 1) Toast.makeText(
+                        context,
+                        "Only one video allowed",
+                        Toast.LENGTH_SHORT
+                    ).show()
                     val video = uris.first()
                     content = content?.copy(
-                        video = ImageAttachment(video)
+                        video = ImageAttachment(
+                            video,
+                        )
                     )
                 } else {
                     val newImages = uris.map { ImageAttachment(it) }
@@ -605,6 +716,11 @@ fun Composer(navigator: DestinationsNavigator, postUri: String? = null) {
 
     suspend fun onPost() {
         withContext(Dispatchers.IO) {
+            if (quotePost != null && quotePost.value == null) {
+                Toast.makeText(context, "Quote post is loading", Toast.LENGTH_SHORT).show()
+                return@withContext
+            }
+
             val text = content?.text ?: ""
             val resolvedMentions = content?.resolvedMentions?.toMutableMap() ?: mutableMapOf()
 
@@ -615,7 +731,8 @@ fun Composer(navigator: DestinationsNavigator, postUri: String? = null) {
             allMentions.forEach { handle ->
                 if (!resolvedMentions.containsKey(handle)) {
                     try {
-                        val response = api.resolveHandle(ResolveHandleQueryParams(Handle(handle))).requireResponse()
+                        val response = api.resolveHandle(ResolveHandleQueryParams(Handle(handle)))
+                            .requireResponse()
                         resolvedMentions[handle] = response.did
                     } catch (e: Exception) {
                         // Failed to resolve, skip it
@@ -626,7 +743,7 @@ fun Composer(navigator: DestinationsNavigator, postUri: String? = null) {
             val finalFacets = calculateFacets(text, resolvedMentions)
 
             val currentImages = content?.images ?: emptyList()
-            val blobs = emptyList<Pair<UploadBlobResponse, ImageAttachment>>().toMutableList()
+            val blobs = emptyList<GalleryImage>().toMutableList()
             if (currentImages.isNotEmpty()) {
                 currentImages.forEach {
                     val blob = api.uploadBlob(
@@ -634,7 +751,23 @@ fun Composer(navigator: DestinationsNavigator, postUri: String? = null) {
                         it.uri.toByteArray(context) ?: throw Exception("No ByteArray")
                     ).requireResponse()
 
-                    blobs.add(blob to it)
+                    val bitmap = BitmapFactory.decodeStream(
+                        context.contentResolver.openInputStream(it.uri)
+                    )
+
+                    val width = bitmap.width.toLong()
+                    val height = bitmap.height.toLong()
+
+                    blobs.add(
+                        GalleryImage(
+                            image = blob.blob,
+                            alt = it.altText,
+                            aspectRatio = AspectRatio(
+                                width,
+                                height
+                            )
+                        )
+                    )
                 }
             }
 
@@ -654,43 +787,94 @@ fun Composer(navigator: DestinationsNavigator, postUri: String? = null) {
                     name = "${nanoId(12)}.${extension}",
                     videoFile = video.uri.toFile(context)
                 ) {
-                    if (it != null) videoUploadProgress = it
-                    else videoUploadProgress = -1
+                    videoUploadProgress = it ?: -1
+                }
+
+                if (blob == null) {
+                    Toast.makeText(context, "Failed to upload video", Toast.LENGTH_SHORT).show()
+                    return@withContext
                 }
 
                 blob
-                    ?: return@withContext {
-                        Toast.makeText(context, "Failed to upload video", Toast.LENGTH_SHORT).show()
-                    }
             } else null
+
+            val embed = if (videoBlob != null) PostEmbedUnion.Video(
+                value = Video(
+                    video = videoBlob,
+                    alt = video?.altText
+                )
+            ) else if (currentImages.isNotEmpty() && currentImages.size <= 4) PostEmbedUnion.Images(
+                Images(
+                    images = blobs.map {
+                        ImagesImage(
+                            image = it.image,
+                            alt = it.alt,
+                            aspectRatio = it.aspectRatio
+                        )
+                    }
+                )
+            )
+            else if (currentImages.isNotEmpty()) PostEmbedUnion.Gallery(
+                Gallery(
+                    items = blobs.map {
+                        GalleryItemUnion.Image(
+                            it
+                        )
+                    }
+                )
+            )
+            else content?.embed
 
             val postRecord = Post(
                 text = text,
                 createdAt = Clock.System.now(),
                 langs = listOf(Language("en")), // Default to English or detect language
-                reply = null,
-                facets = finalFacets,
-                embed = if (videoBlob != null) PostEmbedUnion.Video(
-                    value = Video(
-                        video = videoBlob,
-                        alt = video?.altText
+                reply = if (replyPost != null) {
+                    val postRecord = replyPost.value!!.record.decodeAs<Post>()
+                    val postRef = StrongRef(
+                        uri = replyPost.value!!.uri,
+                        cid = replyPost.value!!.cid
                     )
-                ) else if (currentImages.isNotEmpty()) PostEmbedUnion.Images(
-                    Images(
-                        images = blobs.map {
-                            ImagesImage(
-                                image = it.first.blob,
-                                alt = it.second.altText
+                    PostReplyRef(
+                        root =
+                            if (postRecord.reply != null) postRecord.reply!!.root else postRef,
+                        parent = postRef
+                    )
+                } else null,
+                facets = finalFacets,
+                embed = if (quotePost != null && embed != null) PostEmbedUnion.RecordWithMedia(
+                    value = RecordWithMedia(
+                        record = Record(
+                            StrongRef(
+                                uri = quotePost.value!!.uri,
+                                cid = quotePost.value!!.cid
+                            )
+                        ),
+                        media = embed.toRecordWithMedia()
+                    )
+                ) else if (quotePost != null) PostEmbedUnion.Record(
+                    value = Record(
+                        record = StrongRef(
+                            uri = quotePost.value!!.uri,
+                            cid = quotePost.value!!.cid
+                        )
+                    )
+                ) else embed,
+                labels = if(content?.selfLabels != null && content?.selfLabels?.isNotEmpty() == true) PostLabelsUnion.SelfLabels(
+                    SelfLabels(
+                        content!!.selfLabels.map {
+                            SelfLabel(
+                                it.value
                             )
                         }
                     )
                 )
-                else content?.embed,
+                else null
             )
 
             val recordJson = BlueskyJson.encodeToJsonElement(Post.serializer(), postRecord)
                 .jsonObject.toMutableMap().apply {
-                    put("\$type", JsonPrimitive("app.bsky.feed.post"))
+                    put($$"$type", JsonPrimitive("app.bsky.feed.post"))
                 }
 
             val result = api.createRecord(
@@ -701,14 +885,18 @@ fun Composer(navigator: DestinationsNavigator, postUri: String? = null) {
                 )
             )
 
-            if (result is sh.christian.ozone.api.response.AtpResponse.Success) {
+            if (result is AtpResponse.Success) {
                 Log.d("Composer", "Post created: ${result.response.uri}")
                 content = PostContent() // Clear state
+
+                // Notify the ViewModel to refresh feeds and profile
+                feedModel.notifyPostCreated(Did(session?.did ?: ""))
+
                 withContext(Dispatchers.Main) {
                     navigator.popBackStack()
                 }
             } else {
-                val failure = result as sh.christian.ozone.api.response.AtpResponse.Failure
+                val failure = result as AtpResponse.Failure
                 Log.e("Composer", "Failed to create post: ${failure.error}")
                 throw failure.asException()
             }
@@ -716,9 +904,6 @@ fun Composer(navigator: DestinationsNavigator, postUri: String? = null) {
     }
 
     var isLoading by remember { mutableStateOf(false) }
-
-    val feedModel = LocalFeedModel.current
-    val post = if (postUri != null) feedModel.usePost(postUri) else null
 
     Scaffold(
         topBar = {
@@ -736,34 +921,34 @@ fun Composer(navigator: DestinationsNavigator, postUri: String? = null) {
                 title = {
                     Text(
                         stringResource(
-                            if (postUri != null) R.string.composer_reply else R.string.composer_new_post
+                            if (replyUri != null) R.string.composer_reply else R.string.composer_new_post
                         ),
-                        
-                    )
+
+                        )
                 },
                 actions = {
-                        Button(
-                            onClick = {
-                                scope.launch {
-                                    isLoading = true
-                                    try {
-                                        onPost()
-                                    } finally {
-                                        isLoading = false
-                                    }
+                    Button(
+                        onClick = {
+                            scope.launch {
+                                isLoading = true
+                                try {
+                                    onPost()
+                                } finally {
+                                    isLoading = false
                                 }
-                            },
-                            enabled = !isLoading && (content != null && content!!.isNotEmpty())
-                        ) {
-                            if (isLoading) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(16.dp),
-                                    strokeWidth = 2.dp
-                                )
-                            } else {
-                                Text(stringResource(R.string.post))
                             }
+                        },
+                        enabled = !isLoading && (content != null && content!!.isNotEmpty())
+                    ) {
+                        if (isLoading) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                strokeWidth = 2.dp
+                            )
+                        } else {
+                            Text(stringResource(R.string.post))
                         }
+                    }
                 }
             )
         },
@@ -787,7 +972,7 @@ fun Composer(navigator: DestinationsNavigator, postUri: String? = null) {
                                 )
                             )
                         },
-                        enabled = content?.video == null && (content?.images?.size ?: 0) < 4
+                        enabled = content?.video == null && (content?.images?.size ?: 0) < 10
                     ) {
                         Icon(
                             Icons.Filled.Photo,
@@ -840,6 +1025,26 @@ fun Composer(navigator: DestinationsNavigator, postUri: String? = null) {
                         )
                     }
                 }
+                TooltipBox(
+                    positionProvider =
+                        TooltipDefaults.rememberTooltipPositionProvider(
+
+                        ),
+                    tooltip = { PlainTooltip { Text(stringResource(R.string.media_settings)) } },
+                    state = rememberTooltipState(),
+                ) {
+                    IconButton(
+                        onClick = {
+                            isMediaSettingsOpen = true
+                        },
+                        enabled = content?.hasMedia() == true
+                    ) {
+                        Icon(
+                            Icons.Filled.VideoSettings,
+                            contentDescription = stringResource(R.string.media_settings)
+                        )
+                    }
+                }
             }
         },
         floatingActionButtonPosition = FabPosition.Start
@@ -848,20 +1053,22 @@ fun Composer(navigator: DestinationsNavigator, postUri: String? = null) {
             contentPadding = contentPadding,
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            if (post != null) item {
-                if (post.isLoading) {
+            if (replyPost != null) item {
+                if (replyPost.isLoading) {
                     LoadingPost()
-                } else if (post.value != null) {
+                } else if (replyPost.value != null) {
                     PostComponent(
-                        post.value!!,
-                        navigator,
+                        postView = replyPost.value!!,
+                        navigator = navigator,
                         enabled = false,
                         density = PostDensity.Regular,
                         showActions = false,
                         showLabels = false,
                         showReply = false,
                         showSeparator = false,
-                        showHandle = false
+                        showHandle = false,
+                        showHeadlineDetails = true,
+                        isExpandable = true
                     ) {}
                 }
 
@@ -946,15 +1153,25 @@ fun Composer(navigator: DestinationsNavigator, postUri: String? = null) {
                                         val lastAtIndex = textBeforeCursor.lastIndexOf('@')
 
                                         if (lastAtIndex != -1) {
-                                            val newText = text.substring(0, lastAtIndex) + "@${actor.handle.handle} " + text.substring(selection)
-                                            val newCursorPosition = lastAtIndex + actor.handle.handle.length + 2
+                                            val newText = text.substring(
+                                                0,
+                                                lastAtIndex
+                                            ) + "@${actor.handle.handle} " + text.substring(
+                                                selection
+                                            )
+                                            val newCursorPosition =
+                                                lastAtIndex + actor.handle.handle.length + 2
 
-                                            val newResolvedMentions = (content?.resolvedMentions ?: emptyMap()) + (actor.handle.handle.toString() to actor.did)
+                                            val newResolvedMentions = (content?.resolvedMentions
+                                                ?: emptyMap()) + (actor.handle.handle.toString() to actor.did)
 
                                             content = content?.copy(
                                                 text = newText,
                                                 resolvedMentions = newResolvedMentions,
-                                                facets = calculateFacets(newText, newResolvedMentions)
+                                                facets = calculateFacets(
+                                                    newText,
+                                                    newResolvedMentions
+                                                )
                                             )
                                             textFieldValue = TextFieldValue(
                                                 text = newText,
@@ -991,26 +1208,6 @@ fun Composer(navigator: DestinationsNavigator, postUri: String? = null) {
                 }
             }
             if (content != null && content?.video != null) item {
-                val player = remember { ExoPlayer.Builder(context).build() }
-
-                LaunchedEffect(videoUploadProgress) {
-                    if (videoUploadProgress != null) {
-                        player.pause()
-                    }
-                }
-
-                DisposableEffect(Unit) {
-                    val mediaItem = MediaItem.fromUri(content!!.video!!.uri)
-                    player.setMediaItem(mediaItem)
-                    player.prepare()
-                    player.playWhenReady = true
-                    player.repeatMode = ExoPlayer.REPEAT_MODE_ALL
-
-                    onDispose {
-                        player.release()
-                    }
-                }
-
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1019,14 +1216,9 @@ fun Composer(navigator: DestinationsNavigator, postUri: String? = null) {
                         .clip(MaterialTheme.shapes.medium)
                         .background(MaterialTheme.colorScheme.surfaceContainerHighest)
                 ) {
-                    AndroidView(
-                        factory = { ctx ->
-                            PlayerView(ctx).apply {
-                                resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
-                                this.player = player
-                                useController = false
-                            }
-                        },
+                    MediaPreview(
+                        uri = content!!.video!!.uri,
+                        isPaused = videoUploadProgress != null,
                         modifier = Modifier.fillMaxSize()
                     )
 
@@ -1039,7 +1231,7 @@ fun Composer(navigator: DestinationsNavigator, postUri: String? = null) {
                             .padding(8.dp)
                             .background(
                                 MaterialTheme.colorScheme.surface.copy(alpha = 0.7f),
-                                androidx.compose.foundation.shape.CircleShape
+                                CircleShape
                             )
                             .size(32.dp),
                         colors = IconButtonDefaults.iconButtonColors(
@@ -1064,6 +1256,14 @@ fun Composer(navigator: DestinationsNavigator, postUri: String? = null) {
                                 modifier = Modifier.size(75.dp)
                             )
                         }
+                    }
+
+                    AltTextButton(
+                        isNotEmpty = content?.video?.altText?.isNotEmpty() == true,
+                        modifier = Modifier
+                            .align(Alignment.BottomStart)
+                    ) {
+                        editingAltTextImageIndex = 0
                     }
                 }
             }
@@ -1124,42 +1324,128 @@ fun Composer(navigator: DestinationsNavigator, postUri: String? = null) {
                             }
 
                             // Alt text indicator/button
-                            Row(
+                            AltTextButton(
+                                isNotEmpty = attachment.altText.isNotEmpty(),
                                 modifier = Modifier
                                     .align(Alignment.BottomStart)
-                                    .padding(4.dp)
-                                    .background(
-                                        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.8f),
-                                        RoundedCornerShape(4.dp)
-                                    )
-                                    .clickable { editingAltTextImageIndex = index }
-                                    .padding(horizontal = 4.dp, vertical = 2.dp),
-                                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text(
-                                    text = if (attachment.altText.isEmpty()) "ALT" else "ALT",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                CompositionLocalProvider(
-                                    LocalContentColor provides MaterialTheme.colorScheme.onSurfaceVariant
-                                ) {
-                                    if (attachment.altText.isNotEmpty()) {
-                                        Icon(
-                                            Icons.Rounded.Check,
-                                            contentDescription = "Check",
-                                            modifier = Modifier.size(12.dp)
-                                        )
-                                    } else {
-                                        Icon(
-                                            Icons.Rounded.Edit,
-                                            contentDescription = "Edit",
-                                            modifier = Modifier.size(12.dp)
-                                        )
-                                    }
-                                }
+                                editingAltTextImageIndex = index
                             }
+                        }
+                    }
+                }
+            }
+
+            if (content?.images?.isNotEmpty() == true) {
+                item {
+                    var isGenerating by remember { mutableStateOf(false) }
+                    var progress by remember { mutableIntStateOf(0) }
+                    TextButton(
+                        onClick = {
+                            scope.launch {
+                                isGenerating = true
+
+                                for (index in content!!.images.indices) {
+                                    val attachment = content!!.images[index]
+
+                                    val alt =
+                                        generateAltText(context, attachment.uri) {} ?: continue
+
+                                    content = content?.copy(
+                                        images = content!!.images.toMutableList().apply {
+                                            this[index] = this[index].copy(altText = alt)
+                                        }
+                                    )
+
+                                    progress += 1
+                                }
+
+                                isGenerating = false
+                            }
+                        },
+                        modifier = Modifier.padding(horizontal = 16.dp)
+                    ) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            if (isGenerating) {
+                                LoadingIndicator(modifier = Modifier.size(16.dp))
+                            } else {
+                                Icon(
+                                    Icons.Rounded.AutoAwesome,
+                                    contentDescription = "Magic"
+                                )
+                            }
+
+                            Text(
+                                "Generate alt text ${if (isGenerating) "(${progress}/${content!!.images.size})" else ""}"
+                            )
+                        }
+                    }
+                }
+            }
+
+            if (quotePost != null && quotePost.value != null) {
+                item {
+                    CompositionLocalProvider(
+                        LocalContentColor provides MaterialTheme.colorScheme.onSurface,
+                        LocalEmbedStructureStyle provides EmbedStructureStyle(
+                            border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.surfaceVariant),
+                            colors = null
+                        )
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp)
+                        ) {
+                            QuotePost(
+                                record = quotePost.value!!,
+                                enabled = false,
+                                navigator = navigator,
+                                showHandle = false,
+                                showHeadlineDetails = true,
+                                isExpandable = true
+                            )
+                        }
+                    }
+                }
+            } else if (quotePost != null) {
+                item {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp)
+                    ) {
+                        EmbedStructure(onClick = {}, enabled = false) {
+                            if (quotePost.isLoading) LoadingPost()
+                            else ErrorMessage()
+                        }
+                    }
+                }
+            }
+
+            if (quotePost != null) {
+                item {
+                    TextButton(
+                        onClick = {
+                            content = content?.copy(quoteUri = null)
+                        },
+                        modifier = Modifier.padding(horizontal = 16.dp)
+                    ) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                Icons.Rounded.Delete,
+                                contentDescription = "Delete"
+                            )
+
+                            Text(
+                                "Detach quote"
+                            )
                         }
                     }
                 }
@@ -1190,7 +1476,11 @@ fun Composer(navigator: DestinationsNavigator, postUri: String? = null) {
                         )
                         if (content?.resolvedMentions?.isNotEmpty() == true) {
                             Text(
-                                text = "Resolved Mentions: ${content?.resolvedMentions?.keys?.joinToString(", ")}",
+                                text = "Resolved Mentions: ${
+                                    content?.resolvedMentions?.keys?.joinToString(
+                                        ", "
+                                    )
+                                }",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSecondaryContainer
                             )
@@ -1235,18 +1525,125 @@ fun Composer(navigator: DestinationsNavigator, postUri: String? = null) {
     }
 
     editingAltTextImageIndex?.let { index ->
-        val currentImages = content?.images ?: emptyList()
-        AltTextDialog(
-            uri = currentImages[index].uri,
-            initialText = currentImages[index].altText,
-            onDismiss = { editingAltTextImageIndex = null },
-            onChange = { newAlt ->
-                val updatedImages = currentImages.toMutableList().apply {
-                    this[index] = this[index].copy(altText = newAlt)
+        val isVideo = content?.video != null
+        val attachment = if (isVideo) content?.video else content?.images?.getOrNull(index)
+
+        if (attachment != null) {
+            AltTextDialog(
+                uri = attachment.uri,
+                initialText = attachment.altText,
+                onDismiss = { editingAltTextImageIndex = null }
+            ) { newAlt ->
+                content = if (isVideo) {
+                    content?.copy(video = attachment.copy(altText = newAlt))
+                } else {
+                    val newImages = content?.images?.toMutableList()?.apply {
+                        this[index] = attachment.copy(altText = newAlt)
+                    } ?: emptyList()
+                    content?.copy(images = newImages)
                 }
-                content = content?.copy(images = updatedImages)
+            }
+        }
+    }
+
+    if(isMediaSettingsOpen){
+        MediaSettings(
+            selfLabels = content?.selfLabels ?: emptyList(),
+            onSelfLabelChange = {
+                content = content?.copy(selfLabels = it)
+            },
+            onDismiss = {
+                isMediaSettingsOpen = false
             }
         )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+fun MediaSettings(
+    selfLabels: List<LabelValue>,
+    onSelfLabelChange: (labels: List<LabelValue>) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val state = rememberModalBottomSheetState()
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = state
+    ) {
+        Box(
+            modifier = Modifier
+                .padding(16.dp)
+        ) {
+            LazyColumn(
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                val items = listOf(
+                    LabelValue.Porn,
+                    LabelValue.Nudity,
+                    LabelValue.Sexual,
+                    LabelValue.GraphicMedia
+                )
+                items(items) { label ->
+                    CheckboxPreference(
+                        value = selfLabels.contains(label),
+                        onValueChange = {
+                            onSelfLabelChange(
+                                if (it) selfLabels + label else selfLabels - label
+                            )
+                        },
+                        title = {
+                            Text(
+                                if (label.localizedName() != null) stringResource(label.localizedName()!!)
+                                else label.value
+                            )
+                        },
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun AltTextButton(isNotEmpty: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit){
+    Row(
+        modifier = modifier
+            .padding(4.dp)
+            .background(
+                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.8f),
+                RoundedCornerShape(4.dp)
+            )
+            .clickable {
+                onClick()
+            }
+            .padding(horizontal = 4.dp, vertical = 2.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = "ALT",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        CompositionLocalProvider(
+            LocalContentColor provides MaterialTheme.colorScheme.onSurfaceVariant
+        ) {
+            if (isNotEmpty) {
+                Icon(
+                    Icons.Rounded.Check,
+                    contentDescription = "Check",
+                    modifier = Modifier.size(12.dp)
+                )
+            } else {
+                Icon(
+                    Icons.Rounded.Edit,
+                    contentDescription = "Edit",
+                    modifier = Modifier.size(12.dp)
+                )
+            }
+        }
     }
 }
 
@@ -1263,6 +1660,9 @@ fun AltTextDialog(
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val state = rememberModalBottomSheetState()
+    val isVideo = remember(uri) {
+        context.contentResolver.getType(uri)?.startsWith("video") == true
+    }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -1276,10 +1676,8 @@ fun AltTextDialog(
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 item {
-                    AsyncImage(
-                        model = uri,
-                        contentDescription = null,
-                        //contentScale = ContentScale.Crop,
+                    MediaPreview(
+                        uri = uri,
                         modifier = Modifier
                             .fillMaxWidth()
                             .heightIn(max = 300.dp)
@@ -1304,7 +1702,8 @@ fun AltTextDialog(
                             style = MaterialTheme.typography.titleMedium
                         )
                         Text(
-                            "Alt text describes images for blind or low-vision people.",
+                            if (isVideo) "Alt text describes videos for blind or low-vision people."
+                            else "Alt text describes images for blind or low-vision people.",
                             style = MaterialTheme.typography.bodyMedium.copy(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -1319,7 +1718,7 @@ fun AltTextDialog(
                             onChange(it)
                         },
                         modifier = Modifier.fillMaxWidth(),
-                        placeholder = { Text("Describe this image...") },
+                        placeholder = { Text(if (isVideo) "Describe this video..." else "Describe this image...") },
                         enabled = !isGenerating
                     )
                 }
@@ -1328,34 +1727,36 @@ fun AltTextDialog(
                         modifier = Modifier.fillMaxWidth(),
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        OutlinedButton(
-                            onClick = {
-                                scope.launch {
-                                    isGenerating = true
-                                    text = ""
-                                    generateAltText(context, uri) {
-                                        text += it
-                                        onChange(text)
+                        if (!isVideo) {
+                            OutlinedButton(
+                                onClick = {
+                                    scope.launch {
+                                        isGenerating = true
+                                        text = ""
+                                        generateAltText(context, uri) {
+                                            text += it
+                                            onChange(text)
+                                        }
+                                        isGenerating = false
                                     }
-                                    isGenerating = false
-                                }
-                            },
-                            modifier = Modifier.fillMaxWidth(),
-                        ) {
-                            Row(
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                verticalAlignment = Alignment.CenterVertically
+                                },
+                                modifier = Modifier.fillMaxWidth(),
                             ) {
-                                if (isGenerating) {
-                                    LoadingIndicator(modifier = Modifier.size(24.dp))
-                                } else {
-                                    Icon(
-                                        Icons.Default.AutoFixHigh,
-                                        contentDescription = "Auto fix"
-                                    )
-                                }
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    if (isGenerating) {
+                                        LoadingIndicator(modifier = Modifier.size(24.dp))
+                                    } else {
+                                        Icon(
+                                            Icons.Default.AutoFixHigh,
+                                            contentDescription = "Auto fix"
+                                        )
+                                    }
 
-                                Text("Generate with AI")
+                                    Text("Generate with AI")
+                                }
                             }
                         }
                         Button(
@@ -1388,14 +1789,14 @@ suspend fun generateAltText(
     context: Context,
     uri: AndroidUri,
     onStream: (String) -> Unit
-) {
+): String? {
     val bitmap = try {
         context.contentResolver.openInputStream(uri)?.use {
             BitmapFactory.decodeStream(it)
         }
     } catch (e: Exception) {
         null
-    } ?: return
+    } ?: return null
 
     val options = ImageDescriberOptions.builder(context).build()
     val imageDescriber = ImageDescription.getClient(options)
@@ -1412,10 +1813,23 @@ suspend fun generateAltText(
             imageDescriber.runInference(request) { outputText ->
                 onStream(outputText)
             }.await()
+
+        return imageDescriptionResultStreaming.description
     } catch (e: Exception) {
         Log.e("AltText", "Error generating alt text", e)
+        return null
     } finally {
         imageDescriber.close()
+    }
+}
+
+fun PostEmbedUnion.toRecordWithMedia(): RecordWithMediaMediaUnion {
+    return when (this) {
+        is PostEmbedUnion.Gallery -> RecordWithMediaMediaUnion.Gallery(value)
+        is PostEmbedUnion.Images -> RecordWithMediaMediaUnion.Images(value)
+        is PostEmbedUnion.External -> RecordWithMediaMediaUnion.External(value)
+        is PostEmbedUnion.Video -> RecordWithMediaMediaUnion.Video(value)
+        else -> throw Exception("Unknown post embed type")
     }
 }
 

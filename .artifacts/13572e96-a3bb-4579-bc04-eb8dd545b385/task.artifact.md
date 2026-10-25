@@ -1,0 +1,5 @@
+- [x] Fix aggressive session clearing in `DpopAuthPlugin.kt`
+    - [x] Update `refreshSession` to differentiate between network and auth errors
+    - [x] Update `isInvalidToken` to be more robust (by using `AuthFailureException`)
+- [x] Verify fix by checking logic flow
+- [x] Update `ensureFreshSession` to fallback to old session on network error

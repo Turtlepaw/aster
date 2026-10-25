@@ -1,24 +1,54 @@
 package io.github.turtlepaw.mindsky.ui.theme
 
-import android.os.Build
 import androidx.compose.material3.Typography
 import androidx.compose.ui.text.ExperimentalTextApi
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontVariation
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.sp
-import io.github.turtlepaw.mindsky.R
+import fyi.kittens.shared.R
 
-val default = FontFamily(
-    /*
-    * This can be any font that makes sense
-    */
-    Font(
-        R.font.sora
-    )
+val SoraFontFamily = FontFamily(
+    Font(R.font.sora)
 )
+
+val GoogleSansFontFamily = FontFamily(
+    Font(R.font.google_sans_regular, FontWeight.Normal),
+    Font(R.font.google_sans_medium, FontWeight.Medium),
+    Font(R.font.google_sans_bold, FontWeight.Bold),
+    Font(R.font.google_sans_italic, FontWeight.Normal, FontStyle.Italic)
+)
+
+val default = SoraFontFamily
+
+@OptIn(ExperimentalTextApi::class)
+fun getFontFamily(
+    fontName: String,
+    fontWeightValue: Int = 400,
+    fontWidthValue: Int = 100,
+    fontRoundnessValue: Int = 0
+): FontFamily {
+    val variation = FontVariation.Settings(
+        FontVariation.weight(fontWeightValue),
+        FontVariation.width(fontWidthValue.toFloat()),
+        FontVariation.Setting("ROND", fontRoundnessValue.toFloat())
+    )
+    return when (fontName) {
+        "Google Sans" -> FontFamily(
+            Font(
+                R.font.google_sans_flex,
+                variationSettings = variation
+            )
+        )
+        else -> FontFamily(
+            Font(
+                R.font.sora,
+                variationSettings = variation
+            )
+        )
+    }
+}
 
 fun Typography.withFontFamily(fontFamily: FontFamily): Typography = Typography(
     displayLarge = displayLarge.copy(fontFamily = fontFamily),

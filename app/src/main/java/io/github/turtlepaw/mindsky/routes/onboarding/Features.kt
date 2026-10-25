@@ -34,7 +34,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.ramcosta.composedestinations.annotation.Destination
 import com.ramcosta.composedestinations.annotation.RootGraph
-import io.github.turtlepaw.mindsky.R
+import fyi.kittens.shared.R
 import kotlinx.coroutines.launch
 
 @Destination<RootGraph>

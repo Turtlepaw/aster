@@ -16,7 +16,7 @@ import androidx.compose.ui.unit.dp
 import com.ramcosta.composedestinations.annotation.Destination
 import com.ramcosta.composedestinations.annotation.RootGraph
 import com.ramcosta.composedestinations.navigation.DestinationsNavigator
-import io.github.turtlepaw.mindsky.R
+import fyi.kittens.shared.R
 import io.github.turtlepaw.mindsky.utils.StringComposable
 import me.zhanghai.compose.preference.sliderPreference
 import kotlin.math.roundToInt

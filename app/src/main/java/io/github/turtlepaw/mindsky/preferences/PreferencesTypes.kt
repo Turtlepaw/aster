@@ -5,6 +5,9 @@ import androidx.core.content.edit
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.builtins.serializer
+import kotlinx.serialization.json.Json
 
 // Base preference with caching
 abstract class Preference<T>(
@@ -88,5 +91,24 @@ class IntPreference(
 
     override fun write(prefs: SharedPreferences, value: Int) {
         prefs.edit { putInt(key, value) }
+    }
+}
+
+class StringListPreference(
+    key: String,
+    defaultValue: List<String> = emptyList()
+) : Preference<List<String>>(key, defaultValue) {
+    override fun read(prefs: SharedPreferences): List<String> {
+        val json = prefs.getString(key, null) ?: return defaultValue
+        return try {
+            Json.decodeFromString(ListSerializer(String.serializer()), json)
+        } catch (e: Exception) {
+            defaultValue
+        }
+    }
+
+    override fun write(prefs: SharedPreferences, value: List<String>) {
+        val json = Json.encodeToString(ListSerializer(String.serializer()), value)
+        prefs.edit { putString(key, json) }
     }
 }

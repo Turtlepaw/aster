@@ -3,7 +3,7 @@ package io.github.turtlepaw.mindsky.workers
 import android.content.Context
 import android.util.Log
 import io.github.turtlepaw.mindsky.auth.SessionManager
-import io.github.turtlepaw.mindsky.auth.UserSession
+import fyi.kittens.shared.auth.UserSession
 import io.github.turtlepaw.mindsky.db.ObjectBox
 import io.objectbox.BoxStore
 import sh.christian.ozone.BlueskyApi

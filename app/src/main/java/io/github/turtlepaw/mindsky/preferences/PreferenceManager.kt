@@ -9,11 +9,17 @@ class PreferenceManager(context: Context) {
 
     private val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
         // Find the preference that changed and invalidate its cache
-        AppPrefs.ALL.find { it.key == key }?.invalidateCache(sharedPrefs)
+        AppPrefs.ALL.forEach {
+            if (it.key == key) {
+                it.invalidateCache(sharedPrefs)
+            }
+        }
     }
 
     init {
         sharedPrefs.registerOnSharedPreferenceChangeListener(listener)
+        // Ensure all preference values are read and cached from SharedPreferences on initialization
+        AppPrefs.ALL.forEach { it.getValue(sharedPrefs) }
     }
 
     // Get values (cached)

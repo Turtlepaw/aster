@@ -1,8 +1,10 @@
 package io.github.turtlepaw.mindsky.logic.ranking
 
 import io.github.turtlepaw.mindsky.logic.ranking.InterestClusterer.Companion.averageEmbeddings
+import io.objectbox.annotation.ConflictStrategy
 import io.objectbox.annotation.Entity
 import io.objectbox.annotation.Id
+import io.objectbox.annotation.Unique
 import kotlinx.serialization.json.Json.Default.decodeFromString
 import kotlinx.serialization.json.Json.Default.encodeToString
 
@@ -10,19 +12,16 @@ import kotlinx.serialization.json.Json.Default.encodeToString
 data class PostScore(
     @Id var id: Long = 0,
     val postId: Long,
-    // Store post separately or use a relation
-    val postUri: String, // Instead of embedding the whole post
+    @Unique(onConflict = ConflictStrategy.REPLACE)
+    val postUri: String,
     val finalScore: Double,
-    // Flatten the breakdown
     val semanticSimilarity: Double = 0.0,
     val engagement: Double = 0.0,
     val recency: Double = 0.0,
     val diversity: Double = 0.0,
-    val matchedInterest: String? = null
+    val matchedInterest: String? = null,
+    val lastSeenAt: Long = System.currentTimeMillis() // ← new: tracks last sync that produced this score
 ) {
-    // TODO: verify that the breakdown is included
-
-    // Convenience property to get breakdown
     val breakdown: ScoreBreakdown
         get() = ScoreBreakdown(semanticSimilarity, engagement, recency, diversity)
 

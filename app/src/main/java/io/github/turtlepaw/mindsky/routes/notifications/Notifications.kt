@@ -28,8 +28,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import android.util.Log
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Spacer
@@ -40,18 +38,13 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.LoadingIndicator
-import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.getValue
-import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.zIndex
 import app.bsky.feed.Post
@@ -64,17 +57,18 @@ import com.ramcosta.composedestinations.generated.destinations.FullsizePostDesti
 import com.ramcosta.composedestinations.generated.destinations.ProfileDestination
 import com.ramcosta.composedestinations.navigation.DestinationsNavigator
 import io.github.turtlepaw.fetch_and_cache.InfiniteCache
-import io.github.turtlepaw.mindsky.R
-import io.github.turtlepaw.mindsky.components.Avatar
+import fyi.kittens.shared.R
+import fyi.kittens.shared.ui.Avatar
+import fyi.kittens.shared.ui.LoadMore
 import io.github.turtlepaw.mindsky.components.ErrorMessage
 import io.github.turtlepaw.mindsky.components.post.PostComponent
-import io.github.turtlepaw.mindsky.components.post.PostDensity
+import io.github.turtlepaw.mindsky.components.GenericTopBar
+import fyi.kittens.shared.ui.PostDensity
 import io.github.turtlepaw.mindsky.di.LocalFeedModel
 import io.github.turtlepaw.mindsky.di.LocalMindskyApi
+import io.github.turtlepaw.mindsky.di.LocalNotificationCountProvider
 import io.github.turtlepaw.mindsky.di.LocalScrollToTop
-import io.github.turtlepaw.mindsky.routes.LoadMore
 import io.github.turtlepaw.mindsky.routes.Loading
-import io.github.turtlepaw.mindsky.routes.settings.TopAppBarCommon
 import io.github.turtlepaw.mindsky.utils.ApiUtils.fetchChunkedPosts
 import kotlinx.coroutines.launch
 import sh.christian.ozone.api.AtUri
@@ -128,16 +122,17 @@ fun Notifications(navigator: DestinationsNavigator) {
         }
     }
 
-
-    LaunchedEffect(notifications.value) {
-        Log.d("Notifications", "Notifications updated: ${notifications.value?.size}")
-    }
     val notificationItems = remember(notifications.value) {
         buildNotificationItems(notifications.value ?: emptyList())
     }
     val postLookup = remember { mutableStateMapOf<String, PostView>() }
     var isPostsLoading by remember { mutableStateOf(false) }
     var postsError by remember { mutableStateOf<String?>(null) }
+
+    val notificationCount = LocalNotificationCountProvider.current
+    LaunchedEffect(Unit) {
+        notificationCount.refresh?.let { it() }
+    }
 
     LaunchedEffect(notificationItems) {
         postsError = null
@@ -165,10 +160,11 @@ fun Notifications(navigator: DestinationsNavigator) {
         isPostsLoading = true
         try {
             val fetched = api.fetchChunkedPosts(missing)
-            fetched.forEach { (_, post) ->
+            val fetchedPosts = fetched.map { it.second }
+            fetchedPosts.forEach { post ->
                 postLookup[post.uri.atUri] = post
-                feedModel.addCachedPost(post)
             }
+            feedModel.addCachedPosts(fetchedPosts)
         } catch (e: Exception) {
             postsError = e.message
         } finally {
@@ -178,17 +174,10 @@ fun Notifications(navigator: DestinationsNavigator) {
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = {
-                    Text(
-                        stringResource(R.string.notifications),
-                    )
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = Color.Transparent,
-                    scrolledContainerColor = Color.Transparent,
-                ),
-                modifier = Modifier.zIndex(10f)
+            GenericTopBar(
+                title = stringResource(R.string.notifications),
+                listState = listState,
+                //navigator = navigator
             )
         },
     ) { paddingValues ->
@@ -344,8 +333,8 @@ fun Notifications(navigator: DestinationsNavigator) {
 
                                 if (reason.key == "reply" && post != null) {
                                     PostComponent(
-                                        post,
-                                        navigator,
+                                        postView = post,
+                                        navigator = navigator,
                                         density = PostDensity.Regular,
                                         showActions = true,
                                         showReply = true,
@@ -411,36 +400,6 @@ fun Notifications(navigator: DestinationsNavigator) {
                 }
             }
         }
-
-        val shouldShow by remember {
-            derivedStateOf {
-                listState.firstVisibleItemIndex > 0 ||
-                        listState.firstVisibleItemScrollOffset > 150
-            }
-        }
-
-        val alpha by animateFloatAsState(
-            targetValue = if (shouldShow) 1f else 0f,
-            label = "topBarAlpha",
-            animationSpec = tween(300)
-        )
-
-        Box(
-            modifier = Modifier
-                .alpha(alpha)
-                .fillMaxWidth()
-                .height(200.dp)
-                .background(
-                    Brush.verticalGradient(
-                        colors = listOf(
-                            MaterialTheme.colorScheme.surface.copy(alpha = 1f),
-                            MaterialTheme.colorScheme.surface.copy(alpha = 1f),
-                            Color.Transparent
-                        )
-                    )
-                )
-                .zIndex(1f)
-        )
     }
 }
 

@@ -10,6 +10,7 @@ import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.automirrored.rounded.ArrowForward
 import androidx.compose.material.icons.rounded.Build
 import androidx.compose.material.icons.rounded.Category
+import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material3.Button
@@ -36,8 +37,9 @@ import com.ramcosta.composedestinations.generated.destinations.AdvancedDestinati
 import com.ramcosta.composedestinations.generated.destinations.AppearanceDestination
 import com.ramcosta.composedestinations.generated.destinations.DeveloperToolsDestination
 import com.ramcosta.composedestinations.generated.destinations.InterestClustersDestination
+import com.ramcosta.composedestinations.generated.destinations.MediaSettingsDestination
 import com.ramcosta.composedestinations.navigation.DestinationsNavigator
-import io.github.turtlepaw.mindsky.R
+import fyi.kittens.shared.R
 import io.github.turtlepaw.mindsky.preferences.AppPrefs
 import io.github.turtlepaw.mindsky.preferences.rememberPreference
 import io.github.turtlepaw.mindsky.utils.StringComposable
@@ -122,6 +124,32 @@ fun Settings(navigator: DestinationsNavigator) {
                     Icon(
                         Icons.Rounded.Person,
                         contentDescription = "Accounts",
+                    )
+                },
+                widgetContainer = {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Rounded.ArrowForward,
+                        contentDescription = "Arrow forward",
+                        tint = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.padding(start = 8.dp, end = 16.dp)
+                    )
+                }
+            )
+            preference(
+                key = "media",
+                title = {
+                    R.string.media_settings.StringComposable()
+                },
+                summary = {
+                    Text("Manage media tracking and scrobbling")
+                },
+                onClick = {
+                    navigator.navigate(MediaSettingsDestination)
+                },
+                icon = {
+                    Icon(
+                        Icons.Rounded.MusicNote,
+                        contentDescription = "Media",
                     )
                 },
                 widgetContainer = {

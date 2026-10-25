@@ -1,38 +1,25 @@
 package io.github.turtlepaw.mindsky.components.post.embeds
 
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
 import app.bsky.embed.RecordViewRecord
 import app.bsky.embed.RecordViewRecordEmbedUnion
-import app.bsky.embed.RecordViewRecordUnion
-import app.bsky.feed.GetPostsQueryParams
 import app.bsky.feed.PostView
 import app.bsky.feed.PostViewEmbedUnion
-import com.atproto.repo.GetRecordQueryParams
 import com.atproto.repo.StrongRef
 import com.ramcosta.composedestinations.generated.destinations.FullsizePostDestination
 import com.ramcosta.composedestinations.navigation.DestinationsNavigator
-import io.github.turtlepaw.mindsky.components.ErrorMessage
-import io.github.turtlepaw.mindsky.components.post.LoadingPost
+import fyi.kittens.shared.toPostViewEmbedUnion
+import fyi.kittens.shared.ui.embeds.EmbedStructure
 import io.github.turtlepaw.mindsky.components.post.PostComponent
-import io.github.turtlepaw.mindsky.components.post.PostDensity
-import io.github.turtlepaw.mindsky.di.LocalFeedModel
-import io.github.turtlepaw.mindsky.di.LocalMindskyApi
-import kotlinx.coroutines.launch
+import fyi.kittens.shared.ui.PostDensity
 import kotlinx.serialization.json.Json
-import sh.christian.ozone.api.AtIdentifier
-import sh.christian.ozone.api.Did
-import sh.christian.ozone.api.Handle
-import sh.christian.ozone.api.Nsid
-import sh.christian.ozone.api.RKey
 
 @Composable
-fun QuotePost(record: RecordViewRecord, navigator: DestinationsNavigator) {
+fun QuotePost(
+    record: RecordViewRecord,
+    navigator: DestinationsNavigator,
+    isExpandable: Boolean = false
+) {
     val json = Json {
         ignoreUnknownKeys = true
         classDiscriminator = "\$type"
@@ -62,27 +49,36 @@ fun QuotePost(record: RecordViewRecord, navigator: DestinationsNavigator) {
             navigator,
             showActions = false,
             density = PostDensity.Compact,
-            showLabels = false
+            showLabels = false,
+            isExpandable = isExpandable
         ) {
-            navigator.navigate(FullsizePostDestination(value!!.uri.atUri))
+            navigator.navigate(FullsizePostDestination(value.uri.atUri))
         }
     }
 }
 
-fun RecordViewRecord.toStrongRef(): StrongRef {
-    return StrongRef(
-        uri = this.uri,
-        cid = this.cid,
-    )
-}
-
-fun RecordViewRecordEmbedUnion.toPostViewEmbedUnion(): PostViewEmbedUnion {
-    return when (this) {
-        is RecordViewRecordEmbedUnion.ImagesView -> PostViewEmbedUnion.ImagesView(this.value)
-        is RecordViewRecordEmbedUnion.VideoView -> PostViewEmbedUnion.VideoView(this.value)
-        is RecordViewRecordEmbedUnion.ExternalView -> PostViewEmbedUnion.ExternalView(this.value)
-        is RecordViewRecordEmbedUnion.RecordView -> PostViewEmbedUnion.RecordView(this.value)
-        is RecordViewRecordEmbedUnion.RecordWithMediaView -> PostViewEmbedUnion.RecordWithMediaView(this.value)
-        is RecordViewRecordEmbedUnion.Unknown -> PostViewEmbedUnion.Unknown(this.value)
+@Composable
+fun QuotePost(
+    record: PostView,
+    enabled: Boolean = true,
+    showHandle: Boolean? = null,
+    showHeadlineDetails: Boolean = false,
+    isExpandable: Boolean = false,
+    navigator: DestinationsNavigator
+) {
+    EmbedStructure(onClick = {}, enabled = enabled) {
+        PostComponent(
+            record,
+            navigator,
+            showActions = false,
+            density = PostDensity.Compact,
+            showLabels = false,
+            enabled = enabled,
+            showHandle = showHandle,
+            showHeadlineDetails = showHeadlineDetails,
+            isExpandable = isExpandable
+        ) {
+            navigator.navigate(FullsizePostDestination(record.uri.atUri))
+        }
     }
 }

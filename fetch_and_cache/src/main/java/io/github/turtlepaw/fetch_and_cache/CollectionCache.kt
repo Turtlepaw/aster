@@ -7,13 +7,15 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.builtins.MapSerializer
 import kotlinx.serialization.builtins.serializer
+import kotlinx.serialization.json.Json
 import java.io.File
 import androidx.compose.ui.platform.LocalContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.withLock
-import kotlinx.serialization.json.Json
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
 
 
@@ -31,9 +33,9 @@ class CollectionCache<V>(
     private val fetcher: suspend () -> Map<String, V>,
     private val serializer: KSerializer<V>,
     private val identifier: String,
+    private val ttl: Duration = 1.minutes
 ) {
-    var memory = mutableMapOf<String, V>()
-    private val mutex = Mutex()
+    private val shared = CacheRegistry.getOrCreate<Map<String, V>>(identifier)
 
     private val json = Json {
         ignoreUnknownKeys = true
@@ -46,9 +48,11 @@ class CollectionCache<V>(
             fetcher: suspend () -> Map<String, V>,
             serializer: KSerializer<V>,
             identifier: String,
+            ttl: Duration = 1.minutes,
+            enabled: Boolean = true
         ): CollectionCacheLoadResult<V> {
-            val cache = remember { CollectionCache(fetcher, serializer, identifier) }
-            return cache.load()
+            val cache = remember { CollectionCache(fetcher, serializer, identifier, ttl) }
+            return cache.load(enabled = enabled)
         }
     }
 
@@ -65,7 +69,7 @@ class CollectionCache<V>(
 
     fun getIdentifier() = identifier.hashCode().toString() + ".json"
 
-    private fun writeDisk(context: Context) {
+    private fun writeDisk(context: Context, values: Map<String, V>) {
         val file = File(context.cacheDir, getIdentifier())
         file.parentFile?.mkdirs()
         val mapSerializer =
@@ -73,92 +77,94 @@ class CollectionCache<V>(
 
 
         file.writeText(
-            json.encodeToString(mapSerializer, memory)
+            json.encodeToString(mapSerializer, values)
         )
     }
 
     @Composable
-    fun load(): CollectionCacheLoadResult<V> {
+    fun load(enabled: Boolean = true): CollectionCacheLoadResult<V> {
         val context = LocalContext.current
 
-        var value by remember { mutableStateOf<Map<String, V>>(memory.toMap()) }
-        var isLoading by remember { mutableStateOf(memory.isEmpty()) }
-        var error by remember { mutableStateOf<Throwable?>(null) }
+        val value by shared.value.collectAsState()
+        val isLoading by shared.isLoading.collectAsState()
+        val error by shared.error.collectAsState()
 
         val refresh: suspend () -> Unit = {
-            isLoading = true
+            shared.isLoading.value = true
             try {
-                mutex.withLock {
+                shared.mutex.withLock {
                     val fresh = fetcher()
-                    memory.clear()
-                    memory.putAll(fresh)
-
-                    value = memory.toMap()
-                    writeDisk(context)
+                    shared.value.value = fresh
+                    shared.lastFetched.value = System.currentTimeMillis()
+                    writeDisk(context, fresh)
                 }
             } catch (e: Exception) {
                 if (e is CancellationException) throw e
                 Log.e("CollectionCache", "Error refreshing $identifier", e)
-                error = e
+                shared.error.value = e
             } finally {
-                isLoading = false
+                shared.isLoading.value = false
             }
         }
 
         LaunchedEffect(identifier) {
-            // Memory first
-            if (memory.isNotEmpty()) {
-                value = memory.toMap()
-                isLoading = false
-            } else {
+            if (shared.value.value != null) return@LaunchedEffect
+
+            shared.mutex.withLock {
+                if (shared.value.value != null) return@withLock
+                
                 // Disk second
+                val file = File(context.cacheDir, getIdentifier())
                 readDisk(context)?.let {
-                    memory.putAll(it)
-                    value = it
-                    isLoading = false
+                    shared.value.value = it
+                    shared.lastFetched.value = file.lastModified()
                 }
             }
         }
 
-        LaunchedEffect(identifier + "_refresh") {
-            try {
-                mutex.withLock {
-                    val fresh = fetcher()
-                    memory.clear()
-                    memory.putAll(fresh)
+        LaunchedEffect(identifier + "_refresh", enabled) {
+            if (!enabled) return@LaunchedEffect
 
-                    value = memory.toMap()
-                    writeDisk(context)
+            val now = System.currentTimeMillis()
+            if (shared.value.value != null && (now - shared.lastFetched.value) < ttl.inWholeMilliseconds) {
+                return@LaunchedEffect
+            }
+            
+            try {
+                shared.mutex.withLock {
+                    val fresh = fetcher()
+                    shared.value.value = fresh
+                    shared.lastFetched.value = System.currentTimeMillis()
+                    writeDisk(context, fresh)
                 }
             } catch (e: Exception) {
                 if (e is CancellationException) throw e
                 Log.e("CollectionCache", "Error fetching $identifier", e)
-                error = e
-                isLoading = false
+                shared.error.value = e
+                shared.isLoading.value = false
                 // try again in 15s
                 delay(15.seconds)
                 this.launch {
                     try {
-                        mutex.withLock {
+                        shared.mutex.withLock {
                             val fresh = fetcher()
-                            memory.clear()
-                            memory.putAll(fresh)
-                            value = memory.toMap()
-                            writeDisk(context)
+                            shared.value.value = fresh
+                            shared.lastFetched.value = System.currentTimeMillis()
+                            writeDisk(context, fresh)
                         }
                     } catch (e: Exception) {
                         if (e is CancellationException) throw e
                         Log.e("CollectionCache", "Error on retry for $identifier", e)
-                        error = e
+                        shared.error.value = e
                     }
                 }
             } finally {
-                isLoading = false
+                shared.isLoading.value = false
             }
         }
 
         return CollectionCacheLoadResult(
-            value = value,
+            value = value ?: emptyMap(),
             isLoading = isLoading,
             refresh = refresh,
             error = error

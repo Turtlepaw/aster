@@ -3,6 +3,8 @@ package io.github.turtlepaw.mindsky.cache
 import android.content.Context
 import android.util.Log
 import app.bsky.actor.PreferencesUnion
+import io.github.turtlepaw.mindsky.preferences.AppPrefs
+import io.github.turtlepaw.mindsky.preferences.PreferenceManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -20,6 +22,8 @@ data class LabelerConfig(
     val dids: List<String>,
     val lastUpdated: Long
 )
+
+const val BSKY_MODERATION_DID = "did:plc:ar7c4by46qjdydhdevvrndac"
 
 class LabelerCache(private val context: Context) {
     private val cacheFile = context.cacheDir.resolve("labeler_cache.json")
@@ -84,12 +88,22 @@ class LabelerCache(private val context: Context) {
         }
 
         return try {
-            val prefs: PreferencesUnion.LabelersPref =
-                blueskyApi.getPreferencesForActor().requireResponse().preferences
-                    .filterIsInstance<PreferencesUnion.LabelersPref>()
-                    .first()
+            val preferenceManager = PreferenceManager(context)
+            val enableBskyMod = preferenceManager.get(AppPrefs.EnableBskyModeration)
+            Log.d("LabelCache", "enableBskyMod: $enableBskyMod")
 
-            prefs.value.labelers.map { it.did.did }
+            val labelersPref = blueskyApi.getPreferencesForActor().requireResponse().preferences
+                .filterIsInstance<PreferencesUnion.LabelersPref>()
+                .firstOrNull()
+
+            val labels = (labelersPref?.value?.labelers?.map { it.did.did } ?: emptyList()).run {
+                if (enableBskyMod) {
+                    plus(BSKY_MODERATION_DID)
+                } else this
+            }
+
+            Log.d("LabelerCache", "Fetched $labels")
+            labels
         } catch (e: Exception) {
             Log.e("LabelerCache", "Failed to fetch labelers via BlueskyApi: $e")
             fallbackLabelers

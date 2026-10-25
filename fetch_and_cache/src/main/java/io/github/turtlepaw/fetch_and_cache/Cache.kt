@@ -1,17 +1,17 @@
 package io.github.turtlepaw.fetch_and_cache
 
 import android.content.Context
+import android.util.Log
 import androidx.compose.runtime.*
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.serialization.KSerializer
-import kotlinx.serialization.builtins.MapSerializer
-import kotlinx.serialization.builtins.serializer
-import kotlinx.serialization.json.Json.Default.encodeToString
-import java.io.File
 import androidx.compose.ui.platform.LocalContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.withLock
+import kotlinx.serialization.KSerializer
+import kotlinx.serialization.builtins.MapSerializer
+import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.json.Json.Default.decodeFromString
+import kotlinx.serialization.json.Json.Default.encodeToString
+import java.io.File
 
 
 data class LoadResult<V>(
@@ -26,15 +26,21 @@ class Cache<K, V>(
     private val identifier: String,
     context: Context
 ) {
-    val memory = mutableMapOf<String, V>()
-    val mutex = Mutex()
+    private val shared = CacheRegistry.getOrCreate<Map<String, V>>(identifier)
 
     init {
-        val file = File(context.cacheDir, identifier)
-        if (file.exists()) {
-            val mapSerializer =
-                MapSerializer(String.serializer(), serializer)
-            memory.putAll(decodeFromString(mapSerializer, file.readText()))
+        if (!shared.isLoadedFromDisk) {
+            val file = File(context.cacheDir, identifier)
+            if (file.exists()) {
+                try {
+                    val mapSerializer =
+                        MapSerializer(String.serializer(), serializer)
+                    shared.value.value = decodeFromString(mapSerializer, file.readText())
+                    shared.isLoadedFromDisk = true
+                } catch (e: Exception) {
+                    Log.e("Cache", "Error loading cache from disk for $identifier", e)
+                }
+            }
         }
     }
 
@@ -45,9 +51,11 @@ class Cache<K, V>(
 
         try {
             value = fetcher(key)
-            mutex.withLock {
-                memory[key.toString()] = value!!
-                persistResult(context)
+            shared.mutex.withLock {
+                val currentMap = shared.value.value ?: emptyMap()
+                val updatedMap = currentMap + (key.toString() to value!!)
+                shared.value.value = updatedMap
+                persistResult(context, updatedMap)
             }
         } catch (e: Exception) {
             if (e is CancellationException) throw e
@@ -63,17 +71,26 @@ class Cache<K, V>(
     }
 
     @Composable
-    fun load(key: K): LoadResult<V> {
-        var value: V? by remember { mutableStateOf(memory[key.toString()]) }
-        var isLoading by remember { mutableStateOf(value == null) }
+    fun load(key: K, enabled: Boolean = true): LoadResult<V> {
+        val sharedMap by shared.value.collectAsState()
+        var value: V? by remember(sharedMap, key) { mutableStateOf(sharedMap?.get(key.toString())) }
+        var isLoading by remember(value) { mutableStateOf(value == null) }
         var error by remember { mutableStateOf<String?>(null) }
         val context = LocalContext.current
 
-        LaunchedEffect(key) {
+        LaunchedEffect(key, enabled) {
+            if (!enabled) return@LaunchedEffect
+            if (value != null) return@LaunchedEffect
+            
             try {
-                value = fetcher(key)
-                memory[key.toString()] = value!!
-                persistResult(context)
+                val fetchedValue = fetcher(key)
+                shared.mutex.withLock {
+                    val currentMap = shared.value.value ?: emptyMap()
+                    val updatedMap = currentMap + (key.toString() to fetchedValue!!)
+                    shared.value.value = updatedMap
+                    persistResult(context, updatedMap)
+                }
+                value = fetchedValue
             } catch (e: Exception) {
                 if (e is CancellationException) throw e
                 error = e.message
@@ -88,13 +105,17 @@ class Cache<K, V>(
         )
     }
 
-    private fun persistResult(context: Context){
-        val file = File(context.cacheDir, identifier)
-        val mapSerializer =
-            MapSerializer(String.serializer(), serializer)
+    private fun persistResult(context: Context, map: Map<String, V>) {
+        try {
+            val file = File(context.cacheDir, identifier)
+            val mapSerializer =
+                MapSerializer(String.serializer(), serializer)
 
-        file.writeText(
-            encodeToString(mapSerializer, memory)
-        )
+            file.writeText(
+                encodeToString(mapSerializer, map)
+            )
+        } catch (e: Exception) {
+            Log.e("Cache", "Error persisting result for $identifier", e)
+        }
     }
 }

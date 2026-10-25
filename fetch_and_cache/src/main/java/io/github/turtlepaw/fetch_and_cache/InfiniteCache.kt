@@ -35,9 +35,7 @@ class InfiniteCache<V>(
     private val identifier: String,
     context: Context
 ) {
-    var memory = mutableListOf<V>()
-    val mutex = Mutex()
-    val cursor = mutableStateOf<String?>(null)
+    private val shared = CacheRegistry.getOrCreate<List<V>>(identifier)
 
     private val json: Json get() = defaultJson
 
@@ -49,56 +47,60 @@ class InfiniteCache<V>(
     }
 
     init {
-        val file = File(context.cacheDir, identifier)
-        if (file.exists()) {
-            val text = file.readText()
-            val trimmed = text.dropWhile { it.isWhitespace() }
-            if (trimmed.startsWith("{")) {
-                val stateSerializer = InfiniteCacheState.serializer(serializer)
-                val state = json.decodeFromString(stateSerializer, text)
-                memory = state.values.toMutableList()
-                cursor.value = state.cursor
-            } else if (trimmed.startsWith("[")) {
-                val listSerializer =
-                    ListSerializer(serializer)
-                memory = json.decodeFromString(listSerializer, text).toMutableList()
+        if (!shared.isLoadedFromDisk) {
+            val file = File(context.cacheDir, identifier)
+            if (file.exists()) {
+                try {
+                    val text = file.readText()
+                    val trimmed = text.dropWhile { it.isWhitespace() }
+                    if (trimmed.startsWith("{")) {
+                        val stateSerializer = InfiniteCacheState.serializer(serializer)
+                        val state = json.decodeFromString(stateSerializer, text)
+                        shared.value.value = state.values
+                        shared.cursor.value = state.cursor
+                    } else if (trimmed.startsWith("[")) {
+                        val listSerializer = ListSerializer(serializer)
+                        shared.value.value = json.decodeFromString(listSerializer, text)
+                    }
+                    shared.isLoadedFromDisk = true
+                } catch (e: Exception) {
+                    Log.e("InfiniteCache", "Error loading cache from disk for $identifier", e)
+                }
             }
         }
     }
 
     suspend fun loadAsync(context: Context): InfiniteLoadResult<V> {
-        var value: MutableList<V>? = memory
-        var isLoading = true
+        shared.isLoading.value = true
         var error: String? = null
 
         try {
-            val previousCursor = cursor.value
+            val previousCursor = shared.cursor.value
             val result = fetcher(previousCursor)
-            cursor.value = result.first
-
-            if (previousCursor == null) {
-                value = result.second.toMutableList()
-            } else {
-                if(value.isNullOrEmpty()){
-                    value = result.second.toMutableList()
-                } else
-                    value.addAll( result.second)
-            }
-
-            mutex.withLock {
-                memory = value
-                persistResult(context)
+            
+            shared.mutex.withLock {
+                val currentValues = shared.value.value ?: emptyList()
+                val updatedValues = if (previousCursor == null) {
+                    result.second
+                } else {
+                    currentValues + result.second
+                }
+                
+                shared.value.value = updatedValues
+                shared.cursor.value = result.first
+                persistResult(context, updatedValues, result.first)
             }
         } catch (e: Exception) {
             if (e is CancellationException) throw e
             error = e.message
+        } finally {
+            shared.isLoading.value = false
         }
-        isLoading = false
 
         return InfiniteLoadResult(
-            value = value,
-            isLoading = isLoading,
-            hasMore = cursor.value != null,
+            value = shared.value.value,
+            isLoading = shared.isLoading.value,
+            hasMore = shared.cursor.value != null,
             loadMore = {
                 loadAsync(context)
             },
@@ -110,29 +112,28 @@ class InfiniteCache<V>(
     }
 
     suspend fun refreshAsync(context: Context): InfiniteLoadResult<V> {
-        var value: MutableList<V>? = null
-        var isLoading = true
+        shared.isLoading.value = true
         var error: String? = null
 
         try {
             val result = fetcher(null)
-            cursor.value = result.first
-            value = result.second.toMutableList()
-
-            mutex.withLock {
-                memory = value
-                persistResult(context)
+            
+            shared.mutex.withLock {
+                shared.value.value = result.second
+                shared.cursor.value = result.first
+                persistResult(context, result.second, result.first)
             }
         } catch (e: Exception) {
             if (e is CancellationException) throw e
             error = e.message
+        } finally {
+            shared.isLoading.value = false
         }
-        isLoading = false
 
         return InfiniteLoadResult(
-            value = value,
-            isLoading = isLoading,
-            hasMore = cursor.value != null,
+            value = shared.value.value,
+            isLoading = shared.isLoading.value,
+            hasMore = shared.cursor.value != null,
             loadMore = {
                 loadAsync(context)
             },
@@ -144,95 +145,67 @@ class InfiniteCache<V>(
     }
 
     @Composable
-    fun load(defaultIsLoading: Boolean? = null): InfiniteLoadResult<V> {
-        var value: List<V>? by remember(memory) { mutableStateOf(memory.toList()) }
-        var isLoading by remember { mutableStateOf(defaultIsLoading ?: value.isNullOrEmpty()) }
-        var hasMore by remember { mutableStateOf(cursor.value != null || value.isNullOrEmpty()) }
-        var error by remember { mutableStateOf<String?>(null) }
+    fun load(enabled: Boolean = true): InfiniteLoadResult<V> {
+        val value by shared.value.collectAsState()
+        val cursor by shared.cursor.collectAsState()
+        val isLoading by shared.isLoading.collectAsState()
+        val errorFlow by shared.error.collectAsState()
+        val error = errorFlow?.message
+        
         val context = LocalContext.current
 
         val refresh: suspend () -> Unit = {
-            isLoading = true
-            try {
-                val result = fetcher(null)
-                cursor.value = result.first
-                hasMore = result.first != null
-
-                val updated = result.second
-                value = updated
-
-                mutex.withLock {
-                    memory = updated.toMutableList()
-                    persistResult(context)
-                }
-            } catch (e: Exception) {
-                if (e is CancellationException) throw e
-                error = e.message
-            }
-            isLoading = false
+            refreshAsync(context)
         }
 
         val loadMore: suspend () -> Unit = {
-            isLoading = true
-            try {
-                val previousCursor = cursor.value
-                val result = fetcher(previousCursor)
-                cursor.value = result.first
-                hasMore = result.first != null
-
-                val updated = (value ?: emptyList()) + result.second
-                value = updated
-
-                mutex.withLock {
-                    memory = updated.toMutableList()
-                    persistResult(context)
-                }
-            } catch (e: Exception) {
-                if (e is CancellationException) throw e
-                error = e.message
-            }
-            isLoading = false
+            loadAsync(context)
         }
 
-        LaunchedEffect(Unit) {
+        LaunchedEffect(enabled) {
+            if (!enabled) return@LaunchedEffect
+
+            val now = System.currentTimeMillis()
+            if (value != null && (now - shared.lastFetched.value) < 60 * 1000L) {
+                return@LaunchedEffect
+            }
+            
             try {
                 val result = fetcher(null)
-                cursor.value = result.first
-                hasMore = result.first != null
-
-                val updated = result.second
-                value = updated
-
-                mutex.withLock {
-                    memory = updated.toMutableList()
-                    persistResult(context)
+                shared.mutex.withLock {
+                    shared.value.value = result.second
+                    shared.cursor.value = result.first
+                    shared.lastFetched.value = System.currentTimeMillis()
+                    persistResult(context, result.second, result.first)
                 }
             } catch (e: Exception) {
                 if (e is CancellationException) throw e
-                error = e.message
+                shared.error.value = e
                 Log.e("InfiniteCache", "Error fetching $identifier", e)
             }
-            isLoading = false
         }
 
         return InfiniteLoadResult(
             value = value,
             isLoading = isLoading,
-            hasMore = hasMore,
+            hasMore = cursor != null || value.isNullOrEmpty(),
             loadMore = loadMore,
             refresh = refresh,
             error = error
         )
     }
 
-    private fun persistResult(context: Context){
-        val file = File(context.cacheDir, identifier)
-
-        file.writeText(
-            json.encodeToString(
-                InfiniteCacheState.serializer(serializer),
-                InfiniteCacheState(cursor.value, memory)
+    private fun persistResult(context: Context, values: List<V>, cursor: String?) {
+        try {
+            val file = File(context.cacheDir, identifier)
+            file.writeText(
+                json.encodeToString(
+                    InfiniteCacheState.serializer(serializer),
+                    InfiniteCacheState(cursor, values)
+                )
             )
-        )
+        } catch (e: Exception) {
+            Log.e("InfiniteCache", "Error persisting result for $identifier", e)
+        }
     }
 }

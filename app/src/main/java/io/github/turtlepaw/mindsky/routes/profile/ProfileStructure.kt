@@ -19,6 +19,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -28,7 +31,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import com.ramcosta.composedestinations.navigation.DestinationsNavigator
-import io.github.turtlepaw.mindsky.routes.post.ImageBackButton
+import io.github.turtlepaw.mindsky.routes.post.ImageIconButton
 
 @Composable
 fun ProfileStructure(
@@ -52,9 +55,11 @@ fun ProfileStructure(
                 bottomStart = 25.dp
             )
             banner(
-                Modifier.matchParentSize().clip(
-                    bannerShape
-                )
+                Modifier
+                    .matchParentSize()
+                    .clip(
+                        bannerShape
+                    )
             )
 
             val avatarSize = 100.dp
@@ -75,7 +80,8 @@ fun ProfileStructure(
                 )
 
             Row(
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier
+                    .fillMaxWidth()
                     .offset(y = 140.dp)
                     .padding(start = 20.dp, end = 10.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -94,23 +100,29 @@ fun ProfileStructure(
                 )
             }
 
-           if(showBackButton){
-               MaterialTheme(
-                   colorScheme = MaterialTheme.colorScheme.copy(
-                       surface = Color.Black,
-                       onSurface = Color.White
-                   )
-               ) {
-                   ImageBackButton(
-                       navigator,
-                       modifier = Modifier
-                           .padding(WindowInsets.systemBars.asPaddingValues())
-                           .padding(start = 15.dp),
-                       30.dp,
-                       0.6f
-                   )
-               }
-           }
+            if (showBackButton) {
+                MaterialTheme(
+                    colorScheme = MaterialTheme.colorScheme.copy(
+                        surface = Color.Black,
+                        onSurface = Color.White
+                    )
+                ) {
+                    ImageIconButton(
+                        { navigator.popBackStack() },
+                        modifier = Modifier
+                            .padding(WindowInsets.systemBars.asPaddingValues())
+                            .padding(start = 15.dp),
+                        30.dp,
+                        0.6f
+                    ) {
+                        Icon(
+                            Icons.AutoMirrored.Rounded.ArrowBack,
+                            contentDescription = "Back",
+                            tint = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                }
+            }
         }
 
         Spacer(modifier = Modifier.height(60.dp)) // This makes room for the offset avatar

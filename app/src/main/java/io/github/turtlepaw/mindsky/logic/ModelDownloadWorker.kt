@@ -21,9 +21,12 @@ class ModelDownloadWorker(
 ) : CoroutineWorker(context, params) {
 
     companion object {
-        private const val MODEL_ARM64 = "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/onnx/model_qint8_arm64.onnx"
-        private const val MODEL_CROSS = "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/onnx/model_O4.onnx"
-        private const val TOKENIZER_URL = "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/tokenizer.json"
+        private const val MODEL_ARM64 =
+            "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/onnx/model_qint8_arm64.onnx"
+        private const val MODEL_CROSS =
+            "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/onnx/model_O4.onnx"
+        private const val TOKENIZER_URL =
+            "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/tokenizer.json"
 
         const val MODEL_FILENAME = "model.onnx"
         const val TOKENIZER_FILENAME = "tokenizer.json"
@@ -35,6 +38,14 @@ class ModelDownloadWorker(
                 .setInputData(workDataOf(KEY_STAGE to stage.name))
                 .build()
         }
+
+        fun getOutputFilename(stage: DownloadStage): String {
+            return when (stage) {
+                DownloadStage.Model -> MODEL_FILENAME
+                DownloadStage.Tokenizer -> TOKENIZER_FILENAME
+            }
+        }
+
     }
 
     private fun getDownloadUrl(stage: DownloadStage): String {
@@ -48,19 +59,12 @@ class ModelDownloadWorker(
         }
     }
 
-    private fun getOutputFilename(stage: DownloadStage): String {
-        return when (stage) {
-            DownloadStage.Model -> MODEL_FILENAME
-            DownloadStage.Tokenizer -> TOKENIZER_FILENAME
-        }
-    }
-
     override suspend fun doWork(): Result {
         val stageName = inputData.getString(KEY_STAGE) ?: DownloadStage.Model.name
         val stage = DownloadStage.valueOf(stageName)
         setProgress(workDataOf("progress" to 0, "stage" to stage.name))
 
-        if(stage == DownloadStage.Tokenizer){
+        if (stage == DownloadStage.Tokenizer) {
             // delay to let user read text
             delay(1200)
         }

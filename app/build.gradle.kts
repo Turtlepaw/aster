@@ -13,7 +13,7 @@ android {
     compileSdk = 37
 
     defaultConfig {
-        applicationId = "io.github.turtlepaw.mindsky"
+        applicationId = "fyi.kittens.bsky"
         minSdk = 26
         targetSdk = 36
         versionCode = 1
@@ -25,7 +25,7 @@ android {
     buildTypes {
         debug {
             applicationIdSuffix = ".debug"
-            resValue("string", "app_name", "Mindsky (Debug)")
+            resValue("string", "app_name", "Aster Debug")
         }
         release {
             isMinifyEnabled = false
@@ -121,8 +121,13 @@ dependencies {
 
     // ml
     implementation("com.google.mlkit:genai-image-description:1.0.0-beta1")
+    implementation("com.google.mlkit:genai-prompt:1.0.0-beta4")
 
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.11.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-guava:1.11.0")
 
+    implementation(libs.play.services.wearable)
+    implementation(project(":shared"))
+
+    implementation(libs.androidx.core.splashscreen)
 }

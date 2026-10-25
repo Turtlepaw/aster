@@ -4,8 +4,10 @@ import io.github.turtlepaw.mindsky.db.EmbeddedPost
 import io.github.turtlepaw.mindsky.db.Engagement
 import io.github.turtlepaw.mindsky.db.EngagementType
 import kotlin.math.exp
+import kotlin.math.ln
 import kotlin.math.sqrt
 import kotlin.math.tanh
+import kotlin.time.Clock
 
 object PostRanker {
     // Weights - tune these based on your preferences
@@ -18,10 +20,10 @@ object PostRanker {
     fun scorePost(
         post: EmbeddedPost,
         userProfile: MultiInterestUserProfile,
-        userEngagementHistory: List<Engagement>
+        userEngagementHistoryByAuthor: Map<String, List<Engagement>>
     ): PostScore {
         val (similarity, matchedInterest) = calculateBestClusterSimilarity(post, userProfile)
-        val engagement = calculateEngagementScore(post, userEngagementHistory)
+        val engagement = calculateEngagementScore(post, userEngagementHistoryByAuthor)
         val recency = calculateRecencyScore(post.createdAt)
         val diversity = calculateDiversityBonus(post, userProfile)
 
@@ -83,7 +85,7 @@ object PostRanker {
         else dotProduct / (sqrt(normA) * sqrt(normB))
     }
 
-    private fun calculateEngagementScore(post: EmbeddedPost, history: List<Engagement>): Double {
+    private fun calculateEngagementScore(post: EmbeddedPost, historyByAuthor: Map<String, List<Engagement>>): Double {
         val likeWeight = 1.0
         val repostWeight = 1.5
         val commentWeight = 2.0
@@ -91,29 +93,28 @@ object PostRanker {
 
         var score = 0.0
 
-        // Global engagement (from post metadata)
-        score += post.likeCount * 0.1
-        score += post.repostCount * 0.15
-        score += post.commentCount * 0.2
+        // Global engagement (from post metadata) — log-scaled so viral posts
+        // don't saturate tanh() and drown out personalization
+        score += ln(1.0 + post.likeCount) * 0.3
+        score += ln(1.0 + post.repostCount) * 0.4
+        score += ln(1.0 + post.commentCount) * 0.5
 
-        // Personal engagement history with similar content/authors
-        // Note: topicSimilarity not implemented yet, so we'll just check author
-        history.filter { it.authorDid == post.authorDid }
-            .forEach { engagement ->
-                score += when (engagement.type) {
-                    EngagementType.Like -> likeWeight
-                    EngagementType.Repost -> repostWeight
-                    EngagementType.Comment -> commentWeight
-                    EngagementType.View -> viewTimeWeight * (engagement.dwellTimeMs / 1000.0)
-                }
+        // Personal engagement history with this author
+        historyByAuthor[post.authorDid]?.forEach { engagement ->
+            score += when (engagement.type) {
+                EngagementType.Like -> likeWeight
+                EngagementType.Repost -> repostWeight
+                EngagementType.Comment -> commentWeight
+                EngagementType.View -> viewTimeWeight * (engagement.dwellTimeMs / 1000.0)
             }
+        }
 
-        return tanh(score / 10.0) // Normalize to 0-1 range
+        return tanh(score / 5.0) // lower divisor since log-scaled inputs are much smaller now
     }
 
     private fun calculateRecencyScore(createdAt: Long): Double {
-        val now = System.currentTimeMillis()
-        val ageHours = (now - createdAt) / (1000 * 60 * 60)
+        val now = Clock.System.now().epochSeconds
+        val ageHours = (now - createdAt).toDouble() / (60.0 * 60.0)
 
         // Exponential decay: newer posts get higher scores
         return exp(-ageHours / 24.0) // 24-hour half-life

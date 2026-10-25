@@ -1,5 +1,7 @@
 package io.github.turtlepaw.mindsky.components
 
+import android.widget.Toast
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -15,10 +17,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import io.github.turtlepaw.mindsky.auth.UserSession
+import fyi.kittens.shared.auth.UserSession
 import io.github.turtlepaw.mindsky.di.LocalSessionManager
+import io.github.turtlepaw.mindsky.routes.settings.AccountItem
+import io.github.turtlepaw.mindsky.routes.settings.rememberProfiles
 import io.github.turtlepaw.mindsky.viewmodels.rememberAuthViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -33,107 +38,83 @@ fun AccountSwitcherSheet(
     val currentSession by sessionManager.sessionFlow.collectAsState()
     val sessions = sessionManager.getSessions()
     val sheetState = rememberModalBottomSheetState()
+    val context = LocalContext.current
+
+    val profiles = rememberProfiles(sessions)
 
     if (isOpen) {
         ModalBottomSheet(
             onDismissRequest = onDismiss,
             sheetState = sheetState,
+            containerColor = MaterialTheme.colorScheme.surface,
         ) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(bottom = 32.dp)
+                    .padding(bottom = 24.dp)
             ) {
                 Text(
                     text = "Switch Account",
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.titleMediumEmphasized,
                     modifier = Modifier.padding(horizontal = 24.dp, vertical = 16.dp)
                 )
 
-                LazyColumn {
+                LazyColumn(
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
                     items(sessions) { session ->
                         AccountItem(
                             session = session,
+                            profile = profiles.value.getOrDefault(session.did, null),
+                            modifier = Modifier.padding(horizontal = 24.dp),
                             isCurrent = session.did == currentSession?.did,
-                            onClick = {
+                            logoutEnabled = false,
+                            onLogout = {},
+                            onSwitch = {
                                 authViewModel.switchAccount(session.did)
+                                Toast.makeText(
+                                    context,
+                                    "Switched to ${session.handle}",
+                                    Toast.LENGTH_SHORT
+                                ).show()
                                 onDismiss()
                             }
                         )
                     }
 
                     item {
-                        HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
-                    }
-
-                    item {
                         Surface(
                             onClick = onAddAccount,
-                            modifier = Modifier.fillMaxWidth()
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 12.dp),
+                            shape = MaterialTheme.shapes.medium,
+                            color = Color.Transparent
                         ) {
                             Row(
-                                modifier = Modifier
-                                    .padding(horizontal = 24.dp, vertical = 16.dp),
+                                modifier = Modifier.padding(8.dp),
                                 verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                horizontalArrangement = Arrangement.spacedBy(16.dp)
                             ) {
-                                Icon(Icons.Rounded.Add, contentDescription = null)
-                                Text("Add another account", style = MaterialTheme.typography.bodyLarge)
+                                Box(
+                                    modifier = Modifier
+                                        .size(48.dp)
+                                        .background(MaterialTheme.colorScheme.surfaceContainerHigh, MaterialTheme.shapes.large),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        Icons.Rounded.Add, 
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                                Text(
+                                    "Add another account", 
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    fontWeight = FontWeight.Medium
+                                )
                             }
                         }
                     }
                 }
-            }
-        }
-    }
-}
-
-@Composable
-private fun AccountItem(
-    session: UserSession,
-    isCurrent: Boolean,
-    onClick: () -> Unit
-) {
-    Surface(
-        onClick = onClick,
-        modifier = Modifier.fillMaxWidth(),
-        color = if (isCurrent) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f) else Color.Transparent
-    ) {
-        Row(
-            modifier = Modifier
-                .padding(horizontal = 24.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                Avatar(
-                    avatarUrl = session.avatarUrl,
-                    contentDescription = session.handle,
-                    modifier = Modifier.size(40.dp)
-                )
-                Column {
-                    Text(
-                        text = session.handle,
-                        style = MaterialTheme.typography.bodyLarge,
-                        fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Normal
-                    )
-                    Text(
-                        text = session.did,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-            if (isCurrent) {
-                Icon(
-                    Icons.Rounded.Check,
-                    contentDescription = "Active",
-                    tint = MaterialTheme.colorScheme.primary
-                )
             }
         }
     }

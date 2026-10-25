@@ -89,7 +89,8 @@ data class TangledRepo(
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 fun LazyListScope.tangled(
     identity: String,
-    navigator: DestinationsNavigator
+    navigator: DestinationsNavigator,
+    enabled: Boolean
 ) {
     item {
         Spacer(
@@ -97,7 +98,7 @@ fun LazyListScope.tangled(
         )
     }
     item {
-        val repos = rememberTangledRepos(identity)
+        val repos = rememberTangledRepos(identity, enabled)
         val repoList = remember(repos.value) { repos.value.values.toList() }
 
         val state = when {
@@ -245,7 +246,7 @@ data class ResolveResponse(
 )
 
 @Composable
-internal fun rememberTangledRepos(identifier: String): CollectionCacheLoadResult<TangledRepo> {
+internal fun rememberTangledRepos(identifier: String, enabled: Boolean): CollectionCacheLoadResult<TangledRepo> {
     val context = LocalContext.current
     val client = HttpClient(OkHttp) {
         install(Logging) {
@@ -307,5 +308,6 @@ internal fun rememberTangledRepos(identifier: String): CollectionCacheLoadResult
         },
         serializer = TangledRepo.serializer(),
         identifier = "${identifier}_tangled_repos",
+        enabled = enabled
     )
 }

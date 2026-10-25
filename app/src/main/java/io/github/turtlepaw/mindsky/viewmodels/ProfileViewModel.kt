@@ -7,7 +7,7 @@ import androidx.lifecycle.viewModelScope
 import app.bsky.actor.ProfileViewDetailed
 import com.atproto.label.LabelValueDefinition
 import io.github.turtlepaw.mindsky.auth.SessionManager
-import io.github.turtlepaw.mindsky.auth.UserSession
+import fyi.kittens.shared.auth.UserSession
 import io.github.turtlepaw.mindsky.repositories.ProfileRepository
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow

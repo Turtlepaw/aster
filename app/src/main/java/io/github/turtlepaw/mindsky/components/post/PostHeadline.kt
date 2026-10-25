@@ -1,6 +1,5 @@
 package io.github.turtlepaw.mindsky.components.post
 
-import android.content.Intent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -16,12 +15,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.text.ClickableText
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Bookmark
 import androidx.compose.material.icons.rounded.Dns
-import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
@@ -45,20 +44,19 @@ import androidx.compose.ui.text.TextLinkStyles
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.text.withLink
-import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import app.bsky.actor.ProfileViewBasic
 import app.bsky.labeler.GetServicesResponseViewUnion
-import coil3.compose.AsyncImage
 import coil3.compose.AsyncImagePainter
 import coil3.compose.SubcomposeAsyncImage
 import coil3.compose.SubcomposeAsyncImageContent
 import com.atproto.label.Label
 import com.ramcosta.composedestinations.generated.destinations.ProfileDestination
-import io.github.turtlepaw.mindsky.R
-import io.github.turtlepaw.mindsky.auth.getPdsUrlFromDid
-import io.github.turtlepaw.mindsky.components.Avatar
+import fyi.kittens.shared.auth.getPdsUrlFromDid
+import fyi.kittens.shared.R
+import fyi.kittens.shared.ui.Avatar
+import fyi.kittens.shared.ui.Favicon
+import fyi.kittens.shared.ui.PostDensity
 import io.github.turtlepaw.mindsky.di.LocalLabelManager
 import io.github.turtlepaw.mindsky.di.LocalNavController
 import io.github.turtlepaw.mindsky.preferences.AppPrefs
@@ -82,8 +80,11 @@ fun PostHeadline(
     author: ProfileViewBasic,
     density: PostDensity,
     showLabels: Boolean = false,
-    showHandle: Boolean = true
+    showHandle: Boolean? = null,
+    showHeadlineDetails: Boolean = false,
+    isBookmarked: Boolean = false,
 ) {
+    val defaultShowHandle by rememberPreference(AppPrefs.ShowHandle)
     Column {
         Row(modifier = Modifier.fillMaxWidth()) {
             Box(modifier = Modifier.weight(1f)) {
@@ -106,7 +107,7 @@ fun PostHeadline(
                             if (author.verification?.verifications?.isNotEmpty() != true) {
                                 Spacer(modifier = Modifier.size(5.dp))
                             }
-                            if(showHandle) Text(
+                            if (showHandle ?: defaultShowHandle) Text(
                                 text = "@${author.handle.handle}",
                                 style = MaterialTheme.typography.titleSmall.copy(
                                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
@@ -114,6 +115,16 @@ fun PostHeadline(
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                             )
+                            if(showHeadlineDetails && author.pronouns != null){
+                                Text(
+                                    text = author.pronouns!!,
+                                    style = MaterialTheme.typography.titleSmall.copy(
+                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                                    ),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
                         }
                     }
 
@@ -122,6 +133,18 @@ fun PostHeadline(
             }
 
             Spacer(modifier = Modifier.width(5.dp))
+
+            if (isBookmarked) {
+                Icon(
+                    imageVector = Icons.Rounded.Bookmark,
+                    contentDescription = null,
+                    modifier = Modifier
+                        .size(14.dp)
+                        .align(Alignment.CenterVertically),
+                    tint = MaterialTheme.colorScheme.primary
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+            }
 
             Text(
                 text = timestamp.toRelativeTimeString(),
@@ -152,22 +175,20 @@ fun Labelers(labels: List<Label>?, large: Boolean = false) {
         for (label in labels.filter { !hiddenLabels.contains(it.`val`) }) {
             val resolvedLabel = labelers[label.src.did]
 
-            if (resolvedLabel != null) {
-                LabelComponent(
-                    label = resolvedLabel.getDisplayName(label.`val`),
-                    avatar = resolvedLabel.getAvatar(),
-                    onClick = {
-                        focusedLabel = label
-                    },
-                    isLarge = large
-                )
-            }
+            LabelComponent(
+                label = resolvedLabel?.getDisplayName(label.`val`) ?: label.`val`,
+                avatar = resolvedLabel?.getAvatar() ?: "https://cdn.bsky.app/img/avatar/plain/did:plc:ar7232v22ky3c4v352y26vd2/bafkreihc7g2ouj7fpkq3vnljr4zmzmclqbn3j6q5jwqpt4fjlpywdr2m4@jpeg",
+                onClick = {
+                    focusedLabel = label
+                },
+                isLarge = large
+            )
         }
     }
 
 
     if (focusedLabel != null) {
-        val resolvedLabel = labelers[focusedLabel!!.src.did]!!
+        val resolvedLabel = labelers[focusedLabel!!.src.did]
         ModalBottomSheet(
             onDismissRequest = {
                 focusedLabel = null
@@ -181,61 +202,55 @@ fun Labelers(labels: List<Label>?, large: Boolean = false) {
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 Text(
-                    resolvedLabel.getDisplayName(
+                    resolvedLabel?.getDisplayName(
                         focusedLabel!!.`val`
-                    ),
+                    ) ?: focusedLabel!!.`val`.replaceFirstChar { it.uppercase() },
                     style = MaterialTheme.typography.titleLarge
                 )
 
-                val desciription = resolvedLabel.getDescription(
+                val desciription = resolvedLabel?.getDescription(
                     focusedLabel!!.`val`
-                )
-
-                if (desciription != null) {
-                    Text(
-                        desciription,
-                        style = MaterialTheme.typography.bodyMedium
-                    )
-                }
-
-                val handle = resolvedLabel.getCreatorHandle() ?: "Unknown"
-
-                val annotatedString = buildAnnotatedString {
-                    append("Labeled by ")
-
-                    addLink(
-                        LinkAnnotation.Clickable(
-                            tag = "handle",
-                            styles = TextLinkStyles(
-                                style = SpanStyle(
-                                    color = MaterialTheme.colorScheme.primary
-                                ),
-                                hoveredStyle = SpanStyle(
-                                    background = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
-                                ),
-                                pressedStyle = SpanStyle(
-                                    background = MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
-                                )
-                            )
-                        ) {
-                            scope.launch { sheetState.hide() }.invokeOnCompletion {
-                                nav.navigate(
-                                    ProfileDestination(focusedLabel!!.src.did).route
-                                )
-                            }
-                        },
-                        start = length,
-                        end = length + "@$handle".length
-                    )
-                    append("@$handle")
-                }
+                ) ?: "Content categorized as '${focusedLabel!!.`val`}' by the labeler."
 
                 Text(
-                    text = annotatedString,
-                    style = MaterialTheme.typography.labelMedium.copy(
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
-                    )
+                    desciription,
+                    style = MaterialTheme.typography.bodyMedium
                 )
+
+                val handle = resolvedLabel?.getCreatorHandle() ?: "moderation.bsky.app"
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = "Labelled by",
+                        style = MaterialTheme.typography.labelMedium.copy(
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                        )
+                    )
+
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        modifier = Modifier.clip(
+                            MaterialTheme.shapes.small
+                        ).clickable {
+                            scope.launch { sheetState.show() }
+                        }
+                    ) {
+                        Avatar(
+                            avatarUrl = resolvedLabel?.getAvatar() ?: "https://cdn.bsky.app/img/avatar/plain/did:plc:ar7232v22ky3c4v352y26vd2/bafkreihc7g2ouj7fpkq3vnljr4zmzmclqbn3j6q5jwqpt4fjlpywdr2m4@jpeg",
+                            contentDescription = "Labeler Avatar",
+                            clip = CircleShape,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Text(
+                            text = handle,
+                            style = MaterialTheme.typography.labelMedium
+                        )
+                    }
+                }
             }
         }
     }
@@ -243,16 +258,22 @@ fun Labelers(labels: List<Label>?, large: Boolean = false) {
 
 @Composable
 private fun AuthorNameWithBadges(author: ProfileViewBasic) {
-    FlowRow(verticalArrangement = Arrangement.Center) {
+    FlowRow(
+        verticalArrangement = Arrangement.Center,
+        itemVerticalAlignment = Alignment.CenterVertically
+    ) {
         Text(
             text = author.displayName?.nullable() ?: author.handle.handle,
-            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+            style = MaterialTheme.typography.titleSmall.copy(
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface
+            ),
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
 
         if (author.labels?.find { it.`val` == "bot" } != null) {
-            Robot(Modifier.size(23.dp))
+            Robot(Modifier.size(18.dp))
         }
         if (author.verification?.verifications?.isNotEmpty() == true) {
             Checkmark(Modifier.size(23.dp))
@@ -312,7 +333,8 @@ fun LabelComponent(
         Text(
             text = label,
             style = (if (isLarge) MaterialTheme.typography.labelLarge else MaterialTheme.typography.labelSmall).copy(
-                color = MaterialTheme.colorScheme.onSurface.copy(0.9f)
+                color = MaterialTheme.colorScheme.onSurface.copy(0.9f),
+                fontWeight = if(isLarge) FontWeight.Normal else FontWeight.SemiBold
             ),
             modifier = Modifier.padding(vertical = 2.dp),
             maxLines = 1,
@@ -396,30 +418,23 @@ fun PdsIcon(pds: String?, modifier: Modifier) {
     if (pds != null) Box(
         modifier = Modifier.padding(start = 3.dp)
     ) {
-        SubcomposeAsyncImage(
-            model = "https://twenty-icons.com/${pds}",
+        Favicon(
+            pds,
             contentDescription = "PDS Icon",
-            modifier = Modifier
-                .clip(MaterialTheme.shapes.small)
-                .then(modifier)
-                .background(
-                    MaterialTheme.colorScheme.surfaceVariant
-                )
-        ) {
-            val state by painter.state.collectAsState()
-            if (state is AsyncImagePainter.State.Success) {
-                SubcomposeAsyncImageContent()
-            } else if (state is AsyncImagePainter.State.Error) {
+            placeholder = {
                 Icon(
                     Icons.Rounded.Dns,
-                    contentDescription = "PDS Icon",
+                    contentDescription = it,
                     tint = MaterialTheme.colorScheme.onSurface.copy(0.5f),
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(5.dp)
                 )
-            }
-        }
+            },
+            modifier = Modifier.clip(MaterialTheme.shapes.small).background(
+                MaterialTheme.colorScheme.surfaceVariant
+            ).then(modifier)
+        )
     }
 }
 

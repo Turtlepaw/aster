@@ -8,18 +8,40 @@ import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
 import android.widget.Toast
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.Indication
+import androidx.compose.foundation.IndicationNodeFactory
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculatePan
+import androidx.compose.foundation.gestures.calculateZoom
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Download
+import androidx.compose.material.icons.rounded.TouchApp
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -37,13 +59,19 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
@@ -57,18 +85,28 @@ import coil3.toUri
 import com.ramcosta.composedestinations.annotation.Destination
 import com.ramcosta.composedestinations.annotation.RootGraph
 import com.ramcosta.composedestinations.navigation.DestinationsNavigator
+import fyi.kittens.shared.ui.Avatar
+import io.github.turtlepaw.mindsky.components.sheets.Sheet
+import io.github.turtlepaw.mindsky.components.sheets.rememberSheetState
+import io.github.turtlepaw.mindsky.di.LocalFeedModel
 import kotlinx.coroutines.launch
 import kotlin.math.max
+import androidx.core.content.edit
+import app.bsky.embed.ImagesViewImage
+import kotlinx.serialization.Serializable
+
+private const val IMAGE_LIST_SEPARATOR = "\u001F"
 
 @Composable
-fun ImageBackButton(
-    navigator: DestinationsNavigator,
+fun ImageIconButton(
+    onClick: () -> Unit,
     modifier: Modifier = Modifier,
     size: Dp = Dp.Unspecified,
-    alpha: Float = 0.3f
+    alpha: Float = 0.4f,
+    icon: @Composable () -> Unit
 ) {
     IconButton(
-        onClick = { navigator.navigateUp() },
+        onClick = { onClick() },
         modifier = modifier
             .background(
                 MaterialTheme.colorScheme.surface.copy(alpha),
@@ -76,11 +114,7 @@ fun ImageBackButton(
             )
             .size(size)
     ) {
-        Icon(
-            Icons.AutoMirrored.Rounded.ArrowBack,
-            contentDescription = "Back",
-            tint = MaterialTheme.colorScheme.onSurface
-        )
+        icon()
     }
 }
 
@@ -145,12 +179,74 @@ suspend fun downloadImage(
     }
 }
 
+@Serializable
+data class ImageData(
+    val url: String,
+    val alt: String?,
+)
+
+object ImageDataStore {
+    private val imagesByUrl = mutableMapOf<String, List<ImageData>>()
+
+    fun put(imageUrl: String, images: List<ImageData>) {
+        imagesByUrl[imageUrl] = images
+    }
+
+    fun get(imageUrl: String): List<ImageData>? = imagesByUrl[imageUrl]
+}
+
+fun ImagesViewImage.toImageData(): ImageData {
+    return ImageData(
+        url = fullsize.uri,
+        alt = alt
+    )
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Destination<RootGraph>
 @Composable
-fun Image(navigator: DestinationsNavigator, imageUrl: String, alt: String?) {
+fun Image(
+    navigator: DestinationsNavigator,
+    imageUrl: String,
+    alt: String?,
+    postUri: String? = null
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val feedModel = LocalFeedModel.current
+    val post = if (postUri != null) feedModel.usePost(postUri) else null
+
+    val imageUrls = ImageDataStore.get(imageUrl).takeUnless { it.isNullOrEmpty() } ?: run {
+        listOf(ImageData(url = imageUrl, alt = alt))
+    }
+    val initialPage = remember(imageUrl, imageUrls) {
+        imageUrls.indexOf(
+            imageUrls.find { it.url == imageUrl }
+        ).takeIf { it >= 0 } ?: 0
+    }
+
+    val pagerState = rememberPagerState(
+        initialPage = initialPage,
+        pageCount = { imageUrls.size }
+    )
+    val currentImageUrl = imageUrls[pagerState.currentPage]
+
+    var isAltOpen by remember { mutableStateOf(true) }
+    val altSheetState = rememberSheetState()
+
+    Sheet<Any?>(altSheetState, modifier = Modifier.padding(14.dp)) { close, data ->
+        item {
+            Text(
+                "Alt text",
+                style = MaterialTheme.typography.titleLarge,
+                modifier = Modifier.padding(bottom = 8.dp)
+            )
+        }
+        item {
+            val altText = imageUrls[pagerState.currentPage].alt
+            Text(altText ?: "No alt text provided")
+        }
+    }
 
     MaterialTheme(
         colorScheme = MaterialTheme.colorScheme.copy(
@@ -160,123 +256,263 @@ fun Image(navigator: DestinationsNavigator, imageUrl: String, alt: String?) {
     ) {
         Scaffold(
             topBar = {
-                TopAppBar(
-                    colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = Color.Transparent
-                    ),
-                    navigationIcon = {
-                        ImageBackButton(navigator, modifier = Modifier.padding(start = 16.dp))
-                    },
-                    title = {},
-                    actions = {
-                        IconButton(onClick = {
-                            scope.launch {
-                                val result = downloadImage(
-                                    context = context,
-                                    imageUrl = imageUrl,
-                                    fileName = imageUrl.toUri().lastPathSegment ?: "bsky.jpg"
+                AnimatedVisibility(
+                    visible = isAltOpen,
+                    enter = slideInVertically(initialOffsetY = { -it }) + fadeIn(),
+                    exit = slideOutVertically(targetOffsetY = { -it }) + fadeOut()
+                ) {
+                    TopAppBar(
+                        colors = TopAppBarDefaults.topAppBarColors(
+                            containerColor = Color.Transparent
+                        ),
+                        navigationIcon = {
+                            ImageIconButton(
+                                { navigator.navigateUp() },
+                                modifier = Modifier.padding(start = 16.dp)
+                            ) {
+                                Icon(
+                                    Icons.AutoMirrored.Rounded.ArrowBack,
+                                    contentDescription = "Back",
+                                    tint = MaterialTheme.colorScheme.onSurface
                                 )
-
-                                result.onSuccess {
-                                    Toast.makeText(
-                                        context,
-                                        "Image saved",
-                                        Toast.LENGTH_SHORT
-                                    ).show()
-                                }
-
-                                result.onFailure {
-                                    Toast.makeText(
-                                        context,
-                                        "Download failed",
-                                        Toast.LENGTH_SHORT
-                                    ).show()
-                                    it.printStackTrace()
-                                }
                             }
-                        }) {
-                            Icon(
-                                Icons.Rounded.Download,
-                                contentDescription = "Download",
-                                tint = Color.White
-                            )
+                        },
+                        title = {},
+                        actions = {
+                            ImageIconButton(
+                                {
+                                    scope.launch {
+                                        val result = downloadImage(
+                                            context = context,
+                                            imageUrl = currentImageUrl.url,
+                                            fileName = currentImageUrl.url.toUri().lastPathSegment
+                                                ?: "bsky.jpg"
+                                        )
+
+                                        result.onSuccess {
+                                            Toast.makeText(
+                                                context,
+                                                "Image saved",
+                                                Toast.LENGTH_SHORT
+                                            ).show()
+                                        }
+
+                                        result.onFailure {
+                                            Toast.makeText(
+                                                context,
+                                                "Download failed",
+                                                Toast.LENGTH_SHORT
+                                            ).show()
+                                            it.printStackTrace()
+                                        }
+                                    }
+                                },
+                                modifier = Modifier.padding(end = 16.dp)
+                            ) {
+                                Icon(
+                                    Icons.Rounded.Download,
+                                    contentDescription = "Download",
+                                    tint = Color.White
+                                )
+                            }
                         }
-                    }
-                )
+                    )
+                }
             }
         ) { paddingValues ->
             Box(
                 modifier = Modifier
                     .background(MaterialTheme.colorScheme.surface)
-                    .fillMaxSize()
-                    .padding(paddingValues),
+                    .fillMaxSize(),
                 contentAlignment = Alignment.Center
             ) {
-                var scale by remember { mutableFloatStateOf(1f) }
-                var offset by remember { mutableStateOf(Offset.Zero) }
-                var containerSize by remember { mutableStateOf(IntSize.Zero) }
-                var imageSize by remember { mutableStateOf(IntSize.Zero) }
+                // Satisfy the compiler's requirement to use paddingValues
+                // without affecting the fullscreen image layout
+                Box(Modifier.padding(paddingValues))
 
-                fun clampOffset(offset: Offset): Offset {
-                    val maxX = max(0f, (imageSize.width * scale - containerSize.width) / 2f)
-                    val maxY = max(0f, (imageSize.height * scale - containerSize.height) / 2f)
+                HorizontalPager(
+                    state = pagerState,
+                    modifier = Modifier.fillMaxSize()
+                ) { page ->
+                    var scale by remember { mutableFloatStateOf(1f) }
+                    var offset by remember { mutableStateOf(Offset.Zero) }
+                    var containerSize by remember { mutableStateOf(IntSize.Zero) }
+                    var imageSize by remember { mutableStateOf(IntSize.Zero) }
 
-                    val clampedX = offset.x.coerceIn(-maxX, maxX)
-                    val clampedY = offset.y.coerceIn(-maxY, maxY)
+                    fun clampOffset(offset: Offset): Offset {
+                        val maxX = max(0f, (imageSize.width * scale - containerSize.width) / 2f)
+                        val maxY = max(0f, (imageSize.height * scale - containerSize.height) / 2f)
 
-                    return Offset(clampedX, clampedY)
-                }
+                        val clampedX = offset.x.coerceIn(-maxX, maxX)
+                        val clampedY = offset.y.coerceIn(-maxY, maxY)
 
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        //.zIndex(10f)
-                        .onSizeChanged { containerSize = it }
-                        .pointerInput(Unit) {
-                            detectTransformGestures { _, pan, zoom, _ ->
-                                val newScale = (scale * zoom).coerceIn(1f, 5f)
-                                scale = newScale
+                        return Offset(clampedX, clampedY)
+                    }
 
-                                val newOffset = clampOffset(offset + pan)
-                                offset = newOffset
-                            }
-                        }, // ensure it's above everything
-                    contentAlignment = Alignment.Center
-                ) {
-                    AsyncImage(
-                        model = imageUrl,
-                        contentDescription = "Fullscreen image",
-                        contentScale = ContentScale.Fit,
+                    Box(
                         modifier = Modifier
-                            .onSizeChanged { imageSize = it }
-                            .graphicsLayer(
-                                scaleX = scale,
-                                scaleY = scale,
-                                translationX = offset.x,
-                                translationY = offset.y
-                            )
                             .fillMaxSize()
-                    )
-
-                    if (alt != null) {
-                        Box(
+                            .onSizeChanged { containerSize = it }
+                            .pointerInput(Unit) {
+                                awaitEachGesture {
+                                    awaitFirstDown(requireUnconsumed = false)
+                                    do {
+                                        val event = awaitPointerEvent()
+                                        val pointerCount = event.changes.count { it.pressed }
+                                        if (pointerCount >= 2 || scale > 1f) {
+                                            val zoom = event.calculateZoom()
+                                            val pan = event.calculatePan()
+                                            scale = (scale * zoom).coerceIn(1f, 5f)
+                                            offset = clampOffset(offset + pan)
+                                            event.changes.forEach { it.consume() }
+                                        }
+                                    } while (event.changes.any { it.pressed })
+                                }
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        AsyncImage(
+                            model = imageUrls[page].url,
+                            contentDescription = "Fullscreen image",
+                            contentScale = ContentScale.Fit,
                             modifier = Modifier
-                                .align(Alignment.BottomCenter)
-                                .fillMaxWidth()
-                                .padding(horizontal = 10.dp)
-                                .padding(bottom = 16.dp)
-                                .background(
-                                    Color.Black.copy(alpha = 0.7f),
-                                    MaterialTheme.shapes.medium
+                                .onSizeChanged { imageSize = it }
+                                .graphicsLayer(
+                                    scaleX = scale,
+                                    scaleY = scale,
+                                    translationX = offset.x,
+                                    translationY = offset.y
                                 )
-                                .padding(16.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = alt,
-                                color = Color.White,
-                                style = MaterialTheme.typography.bodyLarge
-                            )
+                                .fillMaxSize()
+                                .clickable(
+                                    interactionSource = null, indication = null
+                                ) {
+                                    isAltOpen = !isAltOpen
+                                }
+                        )
+
+                        val altText = imageUrls[page].alt
+                        if (altText != null) {
+                            AnimatedVisibility(
+                                isAltOpen,
+                                modifier = Modifier
+                                    .align(Alignment.BottomCenter),
+                                enter = slideInVertically(
+                                    initialOffsetY = { it }
+                                ) + fadeIn(),
+                                exit = slideOutVertically(
+                                    targetOffsetY = { it }
+                                ) + fadeOut()
+
+                            ) {
+                                var isOversized by remember(altText) { mutableStateOf(false) }
+                                var showTapToExpand by remember {
+                                    mutableStateOf(
+                                        context.getSharedPreferences(
+                                            "image_viewer",
+                                            Context.MODE_PRIVATE
+                                        ).getInt("alt_expand_uses", 0) < 3
+                                    )
+                                }
+                                val haptics = LocalHapticFeedback.current
+
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .background(
+                                            Brush.verticalGradient(
+                                                listOf(
+                                                    Color.Transparent,
+                                                    Color.Black.copy(alpha = 0.2f),
+                                                    Color.Black.copy(alpha = 0.5f),
+                                                    Color.Black.copy(alpha = 0.8f),
+                                                )
+                                            )
+                                        )
+                                        .padding(horizontal = 24.dp, vertical = 38.dp)
+                                        .padding(top = 20.dp)
+                                        .then(
+                                            if (isOversized) {
+                                                Modifier
+                                                    .clickable {
+                                                        haptics.performHapticFeedback(HapticFeedbackType.Confirm)
+                                                        val preferences = context.getSharedPreferences(
+                                                            "image_viewer",
+                                                            Context.MODE_PRIVATE
+                                                        )
+                                                        val uses = preferences.getInt("alt_expand_uses", 0) + 1
+                                                        preferences.edit {
+                                                            putInt("alt_expand_uses", uses)
+                                                        }
+                                                        if (uses >= 3) {
+                                                            showTapToExpand = false
+                                                        }
+                                                        altSheetState.onOpen()
+                                                    }
+                                                    .clip(MaterialTheme.shapes.small)
+                                            } else {
+                                                Modifier
+                                            }
+                                        ),
+                                    horizontalAlignment = Alignment.Start,
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    if (post?.value != null) {
+                                        val record = post.value!!
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            Avatar(
+                                                avatarUrl = record.author.avatar?.uri,
+                                                contentDescription = record.author.displayName,
+                                                modifier = Modifier.size(24.dp)
+                                            )
+
+                                            Text(
+                                                text = record.author.displayName
+                                                    ?: record.author.handle.handle,
+                                                color = Color.White,
+                                                style = MaterialTheme.typography.bodyLarge.copy(
+                                                    fontWeight = FontWeight.Medium
+                                                )
+                                            )
+                                        }
+                                    }
+
+                                    Text(
+                                        text = altText,
+                                        color = Color.White,
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        maxLines = 3,
+                                        overflow = TextOverflow.Ellipsis,
+                                        onTextLayout = { textLayoutResult ->
+                                            if (textLayoutResult.didOverflowHeight) {
+                                                isOversized = true
+                                            }
+                                        },
+                                    )
+
+                                    if (showTapToExpand) {
+                                        Row(
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            Icon(
+                                                Icons.Rounded.TouchApp,
+                                                contentDescription = "Touch",
+                                                tint = Color.White.copy(0.8f),
+                                                modifier = Modifier.size(12.dp)
+                                            )
+
+                                            Text(
+                                                "Tap to expand",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = Color.White.copy(0.8f)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }

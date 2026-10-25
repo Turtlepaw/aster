@@ -1,7 +1,9 @@
 package io.github.turtlepaw.mindsky.routes.onboarding
 
+import android.util.Log
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -12,14 +14,16 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AlternateEmail
+import androidx.compose.material.icons.rounded.Bookmark
 import androidx.compose.material.icons.rounded.ChevronRight
-import androidx.compose.material.icons.rounded.Coffee
 import androidx.compose.material.icons.rounded.LocalCafe
-import androidx.compose.material.icons.rounded.Public
 import androidx.compose.material3.Card
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Icon
+import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SegmentedListItem
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -29,19 +33,21 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.ramcosta.composedestinations.annotation.Destination
 import com.ramcosta.composedestinations.annotation.RootGraph
+import com.ramcosta.composedestinations.generated.destinations.BookmarksDestination
 import com.ramcosta.composedestinations.generated.destinations.CustomPdsDestination
 import com.ramcosta.composedestinations.generated.destinations.FeedDestination
 import com.ramcosta.composedestinations.generated.destinations.LoginDestination
 import com.ramcosta.composedestinations.navigation.DestinationsNavigator
-import io.github.turtlepaw.mindsky.R
-import io.github.turtlepaw.mindsky.auth.AuthState
-import io.github.turtlepaw.mindsky.components.Avatar
+import fyi.kittens.shared.auth.AuthState
+import fyi.kittens.shared.R
+import fyi.kittens.shared.ui.Avatar
 import io.github.turtlepaw.mindsky.replaceCurrent
 import io.github.turtlepaw.mindsky.routes.settings.TopAppBarCommon
 import io.github.turtlepaw.mindsky.viewmodels.rememberAuthViewModel
@@ -60,7 +66,7 @@ data class Pds(
         val BlueskyPbc = Pds(
             iconUrl = "https://cdn.bsky.app/img/avatar/plain/did:plc:z72i7hdynmk6r22z27h6tvur/bafkreihwihm6kpd6zuwhhlro75p5qks5qtrcu55jp3gddbfjsieiv7wuka",
             name = "Bluesky PBC",
-            description = "The official Bluesky PDS provided by Bluesky PBC.",
+            description = "The official hosting service provided by Bluesky PBC.",
             url = "https://bsky.social",
         )
 
@@ -74,7 +80,7 @@ data class Pds(
         val SelfHostedSocial = Pds(
             iconUrl = null,
             name = "selfhosted.social",
-            description = "PDS run by @baileytownsend.dev",
+            description = "Hosting service run by @baileytownsend.dev",
             url = "https://selfhosted.social"
         )
 
@@ -89,6 +95,7 @@ data class Pds(
     }
 }
 
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Destination<RootGraph>
 @Composable
 fun PdsList(navigator: DestinationsNavigator, isOnboarding: Boolean = true) {
@@ -110,11 +117,13 @@ fun PdsList(navigator: DestinationsNavigator, isOnboarding: Boolean = true) {
                 MaterialTheme.typography.titleMedium
             )
         }
-    ) {
+    ) { padding ->
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(it)
+                .padding(padding)
+                .padding(horizontal = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(ListItemDefaults.SegmentedGap)
         ) {
             itemsIndexed(Pds.All) { index, pds ->
                 PdsItem(
@@ -123,8 +132,9 @@ fun PdsList(navigator: DestinationsNavigator, isOnboarding: Boolean = true) {
                     listSize = Pds.All.size
                 ) {
                     viewModel.pds = pds.url
+                    Log.d("PdsList", "Selected PDS: ${pds.url}")
                     navigator.navigate(
-                        if (pds.url.isNullOrBlank())
+                        if (pds.url.isBlank())
                             CustomPdsDestination(isOnboarding)
                         else LoginDestination(pds.url, isOnboarding)
                     )
@@ -134,96 +144,83 @@ fun PdsList(navigator: DestinationsNavigator, isOnboarding: Boolean = true) {
     }
 }
 
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun PdsItem(pds: Pds, index: Int, listSize: Int, onClick: () -> Unit) {
     val topRadius = if (listSize == 1 || index == 0) 20.dp else 10.dp
     val bottomRadius = if (listSize == 1 || index == listSize - 1) 20.dp else 10.dp
 
-    Card(
-        modifier = Modifier
-            .padding(horizontal = 12.dp, vertical = 2.dp)
-            .fillMaxWidth(),
+    SegmentedListItem(
+        shapes = ListItemDefaults.segmentedShapes(index = index, count = listSize),
+        colors = ListItemDefaults.segmentedColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHighest
+        ),
         onClick = onClick,
-        shape = RoundedCornerShape(
-            topStart = topRadius,
-            topEnd = topRadius,
-            bottomStart = bottomRadius,
-            bottomEnd = bottomRadius
-        )
-    ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(16.dp)
-        ) {
+        contentPadding = PaddingValues(16.dp),
+        content = {
             Row(
-                modifier = Modifier.weight(1f), // Constrain this part to available space
-                horizontalArrangement = Arrangement.spacedBy(16.dp),
                 verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(
+                    4.dp,
+                    alignment = Alignment.Start
+                ),
             ) {
-                if (pds.iconUrl != null) {
-                    Avatar(
-                        modifier = Modifier.size(50.dp),
-                        pds.iconUrl,
-                        "${pds.name} icon",
-                        clip = MaterialTheme.shapes.large
-                    )
-                } else {
-                    when (pds){
-                        Pds.SelfHostedSocial -> Avatar(
-                            modifier = Modifier.size(50.dp),
-                            Icons.Rounded.LocalCafe,
-                            contentDescription = "Local Cafe",
-                            clip = MaterialTheme.shapes.large
-                        )
-                        Pds.CustomPds -> Icon(
-                            Icons.Rounded.AlternateEmail,
-                            contentDescription = "At sign",
-                            modifier = Modifier.size(50.dp).padding(10.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
+                Text(
+                    pds.name,
+                    style = MaterialTheme.typography.titleMedium,
+                    overflow = TextOverflow.Ellipsis
+                )
 
-                Column(
-                    modifier = Modifier.fillMaxWidth() // Use remaining width inside weighted container
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(
-                            4.dp,
-                            alignment = Alignment.Start
-                        ),
-                    ) {
-                        Text(
-                            pds.name,
-                            style = MaterialTheme.typography.titleMedium,
-                            overflow = TextOverflow.Ellipsis
-                        )
-
-                        if (pds.verified) {
-                            Icon(
-                                painterResource(R.drawable.check_circle),
-                                contentDescription = "Verified",
-                                modifier = Modifier
-                                    .size(20.dp),
-                                tint = MaterialTheme.colorScheme.primary
-                            )
-                        }
-                    }
-                    Text(
-                        pds.description,
-                        style = MaterialTheme.typography.bodySmall,
-                        overflow = TextOverflow.Ellipsis
+                if (pds.verified) {
+                    Icon(
+                        painterResource(R.drawable.check_circle),
+                        contentDescription = "Verified",
+                        modifier = Modifier
+                            .size(20.dp),
+                        tint = MaterialTheme.colorScheme.primary
                     )
                 }
             }
-
+        },
+        supportingContent = {
+            Text(
+                pds.description,
+                style = MaterialTheme.typography.bodySmall,
+                overflow = TextOverflow.Ellipsis
+            )
+        },
+        leadingContent = {
+            if (pds.iconUrl != null) {
+                Avatar(
+                    modifier = Modifier.size(50.dp),
+                    pds.iconUrl,
+                    "${pds.name} icon",
+                    clip = MaterialTheme.shapes.large
+                )
+            } else {
+                when (pds){
+                    Pds.SelfHostedSocial -> Avatar(
+                        modifier = Modifier.size(50.dp),
+                        Icons.Rounded.LocalCafe,
+                        contentDescription = "Local Cafe",
+                        clip = MaterialTheme.shapes.large
+                    )
+                    Pds.CustomPds -> Icon(
+                        Icons.Rounded.AlternateEmail,
+                        contentDescription = "At sign",
+                        modifier = Modifier.size(50.dp).padding(10.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        },
+        trailingContent = {
             Icon(
                 Icons.Rounded.ChevronRight,
                 contentDescription = "Chevron Right",
             )
         }
-    }
+    )
 }
 
 @Composable
@@ -231,4 +228,3 @@ fun TextStyle.toDp(): Dp {
     val density = LocalDensity.current
     return with(density) { fontSize.toDp() }
 }
-

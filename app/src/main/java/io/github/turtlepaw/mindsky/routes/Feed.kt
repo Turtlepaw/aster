@@ -11,7 +11,6 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,9 +19,19 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.LazyListState
@@ -30,32 +39,28 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.PostAdd
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Error
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
-import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearWavyProgressIndicator
-import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.PrimaryScrollableTabRow
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
+import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.livedata.observeAsState
-import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -71,8 +76,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import androidx.lifecycle.ViewModel
@@ -80,25 +83,22 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import androidx.work.WorkQuery
-import app.bsky.actor.PreferencesUnion
 import app.bsky.feed.GeneratorView
-import app.bsky.feed.GetFeedGeneratorsQueryParams
-import app.bsky.graph.GetListQueryParams
-import app.bsky.graph.GetListsQueryParams
 import app.bsky.graph.ListView
 import com.ramcosta.composedestinations.annotation.Destination
 import com.ramcosta.composedestinations.annotation.RootGraph
-import com.ramcosta.composedestinations.generated.destinations.ComposerDestination
 import com.ramcosta.composedestinations.generated.destinations.DownloadModelDestination
 import com.ramcosta.composedestinations.generated.destinations.FullsizePostDestination
-import com.ramcosta.composedestinations.generated.destinations.MyProfileDestination
+import io.github.turtlepaw.mindsky.components.post.ThreadedPostComponent
+import fyi.kittens.shared.FeedTuner
 import com.ramcosta.composedestinations.generated.destinations.SettingsDestination
 import com.ramcosta.composedestinations.navigation.DestinationsNavigator
-import io.github.turtlepaw.fetch_and_cache.SingleCache
 import com.ramcosta.composedestinations.generated.destinations.PdsListDestination
 import io.github.turtlepaw.mindsky.components.AccountSwitcherSheet
-import io.github.turtlepaw.mindsky.R
-import io.github.turtlepaw.mindsky.components.Avatar
+import fyi.kittens.shared.R
+import fyi.kittens.shared.ui.Avatar
+import fyi.kittens.shared.ui.LoadMore
+import io.github.turtlepaw.mindsky.components.sheets.AccountSheet
 import io.github.turtlepaw.mindsky.components.TopBarBackground
 import io.github.turtlepaw.mindsky.components.TopBarInteractiveElements
 import io.github.turtlepaw.mindsky.components.post.LoadingPost
@@ -111,7 +111,6 @@ import io.github.turtlepaw.mindsky.di.LocalScrollToTop
 import io.github.turtlepaw.mindsky.logic.ModelDownloadWorker
 import io.github.turtlepaw.mindsky.preferences.AppPrefs
 import io.github.turtlepaw.mindsky.preferences.LocalPreferences
-import io.github.turtlepaw.mindsky.preferences.rememberPreference
 import io.github.turtlepaw.mindsky.replaceCurrent
 import io.github.turtlepaw.mindsky.viewmodels.FeedViewModel
 import io.github.turtlepaw.mindsky.viewmodels.ProfileUiState
@@ -240,14 +239,70 @@ fun Feed(nav: DestinationsNavigator) {
     val context = LocalContext.current
     val viewModel = LocalFeedModel.current
     val api = LocalMindskyApi.current
-    val listState = rememberLazyListState()
     val scrollToTopHandler = LocalScrollToTop.current
     val coroutineScope = rememberCoroutineScope()
 
-    DisposableEffect(listState) {
+    var lastFetchTime by remember { mutableLongStateOf(0L) }
+
+    val followingFeedData = viewModel.followingFeed.value
+    val forYouFeedData = viewModel.forYouFeed.value
+    val customFeedsData = viewModel.customFeeds
+
+    val isFetchingFromViewModel =
+        viewModel.isFetchingFeed.value || viewModel.isFetchingCustomFeeds.values.any { it }
+    val error = viewModel.error.value
+
+    val prefs = LocalPreferences.current
+    val feeds = viewModel.userFeeds.value
+
+    val logoAreaHeight = 40.dp
+    val density = LocalDensity.current
+    val statusBarHeightPx = WindowInsets.statusBars.asPaddingValues().calculateTopPadding().let {
+        with(density) { it.toPx() }
+    }
+    val logoAreaHeightPx = with(density) { logoAreaHeight.toPx() }
+
+    val tabRowHeightPx = remember { mutableFloatStateOf(0f) }
+    val headerOffsetHeightPx = remember { mutableFloatStateOf(0f) }
+
+    val nestedScrollConnection = remember(tabRowHeightPx.floatValue, logoAreaHeightPx) {
+        object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                val delta = available.y
+                val oldOffset = headerOffsetHeightPx.floatValue
+                val newOffset = oldOffset + delta
+
+                // Translate up to the height of the tab row and logo area
+                headerOffsetHeightPx.floatValue = newOffset.coerceIn(-(tabRowHeightPx.floatValue + logoAreaHeightPx), 0f)
+                val consumed = headerOffsetHeightPx.floatValue - oldOffset
+
+                return Offset(x = 0f, y = consumed)
+            }
+        }
+    }
+
+    val pagerState = rememberPagerState(
+        initialPage = 0,
+        pageCount = { feeds.size }
+    )
+
+    // Map to store LazyListState for each feed tab
+    val listStates = remember {
+        mutableMapOf<String, LazyListState>()
+    }
+
+    val currentFeedId = remember(pagerState.currentPage, feeds) {
+        if (feeds.isNotEmpty() && pagerState.currentPage in feeds.indices) {
+            feeds[pagerState.currentPage].first
+        } else null
+    }
+
+    val currentListState = listStates[currentFeedId] ?: rememberLazyListState()
+
+    DisposableEffect(currentListState) {
         val handler: () -> Unit = {
             coroutineScope.launch {
-                listState.animateScrollToItem(0)
+                currentListState.animateScrollToItem(0)
             }
             Unit
         }
@@ -259,21 +314,19 @@ fun Feed(nav: DestinationsNavigator) {
         }
     }
 
-    var lastFetchTime by remember { mutableLongStateOf(0L) }
+    LaunchedEffect(feeds) {
+        if (feeds.isNotEmpty()) {
+            val defaultFeed = prefs.get(AppPrefs.DefaultFeed)
+            if (defaultFeed in feeds.indices) {
+                pagerState.scrollToPage(defaultFeed)
+            }
+        }
+    }
 
-    val followingFeedData = viewModel.followingFeed.value
-    val forYouFeedData = viewModel.forYouFeed.value
-    val customFeedData = viewModel.customFeed.value
-
-    val isFetchingFromViewModel =
-        viewModel.isFetchingFeed.value || viewModel.isFetchingCustomFeed.value // Use ViewModel's state
-    val error = viewModel.error.value
-
-    var selectedDestination by rememberSaveable { mutableIntStateOf(0) }
-    val prefs = LocalPreferences.current
-
-    LaunchedEffect(Unit) {
-        selectedDestination = prefs.get(AppPrefs.DefaultFeed)
+    LaunchedEffect(pagerState.currentPage) {
+        if (feeds.isNotEmpty()) {
+            prefs.set(AppPrefs.DefaultFeed, pagerState.currentPage)
+        }
     }
 
     val workManager = WorkManager.getInstance(context)
@@ -287,23 +340,14 @@ fun Feed(nav: DestinationsNavigator) {
         workInfos?.firstOrNull { it.state == WorkInfo.State.RUNNING || it.state == WorkInfo.State.ENQUEUED }
     }
 
-    val feeds = viewModel.userFeeds.value
-    val safeSelectedDestination =
-        selectedDestination.coerceIn(0, (feeds.size - 1).coerceAtLeast(0))
-
-    LaunchedEffect(Unit) {
+    LaunchedEffect(viewModel) {
         viewModel.fetchUserFeeds()
     }
 
-    LaunchedEffect(safeSelectedDestination, feeds.size) {
+    LaunchedEffect(pagerState.currentPage, feeds.size, viewModel) {
         if (feeds.isEmpty()) return@LaunchedEffect
 
-        val isCorrectingOutOfBounds = selectedDestination != safeSelectedDestination
-
-        if (isCorrectingOutOfBounds) {
-            selectedDestination = safeSelectedDestination
-            prefs.set(AppPrefs.DefaultFeed, safeSelectedDestination)
-        }
+        val safeSelectedDestination = pagerState.currentPage.coerceIn(feeds.indices)
 
         if (feeds.isNotEmpty()) {
             val feedId = feeds[safeSelectedDestination].first
@@ -331,99 +375,297 @@ fun Feed(nav: DestinationsNavigator) {
     ) { paddingValues ->
         Box(
             modifier = Modifier
-                .padding(paddingValues)
                 .fillMaxSize()
+                .nestedScroll(nestedScrollConnection)
         ) {
-            LazyColumn(
-                state = listState,
+            // LAYER 0: FIXED TOP GRADIENT
+            // This is the gradient that the logo and tabs "disappear into"
+            TopBarBackground(
+                modifier = Modifier
+                    .graphicsLayer {
+                        // Fade in the gradient as the header collapses
+                        // It becomes fully opaque once the scroll starts (10dp threshold)
+                        alpha = (-headerOffsetHeightPx.floatValue / with(density) { 10.dp.toPx() }).coerceIn(0f, 1f)
+                    }
+                    .zIndex(10f)
+            )
+
+            // LAYER 1: FIXED PAGER (CONTENT)
+            // It fills the whole screen, but we use a top spacer inside LazyColumn
+            HorizontalPager(
+                state = pagerState,
                 modifier = Modifier
                     .fillMaxSize()
-                    .zIndex(1f), // Base layer for scrolling content
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = if (error != null) Arrangement.Center else Arrangement.Top
+                    .zIndex(1f),
+                beyondViewportPageCount = 1
+            ) { page ->
+                val destination = feeds[page]
+                val feedId = destination.first
+                val pageListState = rememberSaveable(feedId, saver = LazyListState.Saver) {
+                    LazyListState()
+                }
+
+                LaunchedEffect(pageListState) {
+                    listStates[feedId] = pageListState
+                }
+
+                val threadedFollowingFeed = if (destination.second is FeedItem.Following && followingFeedData != null) {
+                    remember(followingFeedData) {
+                        FeedTuner.groupThreads(followingFeedData)
+                    }
+                } else null
+
+                val customFeedData = customFeedsData[AtUri(feedId)]
+                val threadedCustomFeed = if ((destination.second is FeedItem.FeedGenerator || destination.second is FeedItem.List) && customFeedData != null) {
+                    remember(customFeedData) {
+                        FeedTuner.groupThreads(customFeedData)
+                    }
+                } else null
+
+                LazyColumn(
+                    state = pageListState,
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = paddingValues,
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = if (error != null) Arrangement.Center else Arrangement.Top
+                ) {
+                    item {
+                        // The top area is Logo (fixed height) + Tab Row
+                        // We reserve this space at the top of the list.
+                        val topSpacerHeight = with(LocalDensity.current) {
+                            (logoAreaHeightPx + tabRowHeightPx.floatValue).toDp()
+                        }
+                        Spacer(modifier = Modifier.height(topSpacerHeight))
+                    }
+                    if (error != null) {
+                        item {
+                            Icon(
+                                Icons.Rounded.Error,
+                                contentDescription = "Error",
+                                modifier = Modifier
+                                    .padding(bottom = 12.dp)
+                                    .size(40.dp)
+                            )
+                        }
+                        item {
+                            Text(
+                                text = "Failed to fetch your feed",
+                                style = MaterialTheme.typography.titleLarge
+                            )
+                        }
+                        item {
+                            Box(
+                                modifier = Modifier
+                                    .padding(16.dp)
+                                    .background(
+                                        MaterialTheme.colorScheme.surfaceContainerHigh,
+                                        MaterialTheme.shapes.medium
+                                    )
+                                    .border(
+                                        1.dp,
+                                        MaterialTheme.colorScheme.outline.copy(0.2f),
+                                        MaterialTheme.shapes.medium
+                                    )
+                                    .padding(16.dp)
+                            ) {
+                                Text(
+                                    text = error,
+                                )
+                            }
+                        }
+                    } else {
+                        if (viewModel.isFetchingUserFeeds.value && feeds.isEmpty()) {
+                            Loading()
+                        }
+
+                        when (destination.second) {
+                            is FeedItem.Following -> {
+                                if (threadedFollowingFeed != null) {
+                                    items(
+                                        items = threadedFollowingFeed,
+                                        key = { it.first().post.uri.atUri }
+                                    ) { thread ->
+                                        ThreadedPostComponent(thread, nav) { clickedPost ->
+                                            nav.navigate(FullsizePostDestination(clickedPost.post.uri.atUri))
+                                        }
+                                    }
+                                    if (followingFeedData != null && followingFeedData.isNotEmpty() && viewModel.hasMoreFollowing.value) {
+                                        item {
+                                            LoadMore(followingFeedData.size) {
+                                                viewModel.loadMoreFollowingFeed()
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    Loading()
+                                }
+                            }
+
+                            is FeedItem.ForYou -> {
+                                if (!forYouFeedData.isNullOrEmpty()) {
+                                    items(
+                                        items = forYouFeedData,
+                                        key = { it.post.uri.atUri }
+                                    ) {
+                                        PostComponent(it.post, nav, discoveryContext = {
+                                            PostInsightsContext(
+                                                it.score
+                                            )
+                                        }) {
+                                            nav.navigate(FullsizePostDestination(it.post.uri.atUri))
+                                        }
+                                    }
+                                    if (
+                                        //forYouFeedData.isNotEmpty() && viewModel.hasMoreForYou.value
+                                        false
+                                        ) {
+                                        item {
+                                            LoadMore(forYouFeedData.size) {
+                                                viewModel.loadMoreForYouFeeds()
+                                            }
+                                        }
+                                    } else {
+//                                        item {
+//                                            Box(
+//                                                modifier = Modifier.height(200.dp).background(
+//                                                    Brush.verticalGradient(
+//                                                        listOf(
+//                                                            Color.Transparent,
+//                                                            MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
+//                                                            MaterialTheme.colorScheme.primary.copy(alpha = 0.8f),
+//                                                        )
+//                                                    )
+//                                                )
+//                                            ) {
+//                                                Column(
+//                                                    modifier = Modifier.fillMaxSize(),
+//                                                    verticalArrangement = Arrangement.Center,
+//                                                    horizontalAlignment = Alignment.CenterHorizontally
+//                                                ) {
+//                                                    Text("That's all for now!", style = MaterialTheme.typography.titleMedium)
+//                                                    Text("Your for you feed will refresh tomorrow", style = MaterialTheme.typography.bodySmall)
+//                                                }
+//                                            }
+//                                        }
+                                    }
+                                } else if (forYouFeedData != null && forYouFeedData.isEmpty()) {
+                                    item {
+                                        Box(
+                                            modifier = Modifier.fillMaxSize(),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text(
+                                                text = "No posts available",
+                                                style = MaterialTheme.typography.bodyLarge,
+                                                modifier = Modifier.padding(16.dp)
+                                            )
+                                        }
+                                    }
+                                    item {
+                                        Button(
+                                            onClick = {
+                                                WorkManager.getInstance(context)
+                                                    .enqueueImmediateWorkers()
+                                            }
+                                        ) {
+                                            Text("Generate For You Feed")
+                                        }
+                                    }
+                                } else {
+                                    Loading()
+                                }
+                            }
+
+                            is FeedItem.FeedGenerator, is FeedItem.List -> {
+                                if (!threadedCustomFeed.isNullOrEmpty()) {
+                                    items(
+                                        items = threadedCustomFeed,
+                                        key = { it.first().post.uri.atUri }
+                                    ) { thread ->
+                                        ThreadedPostComponent(thread, nav) { clickedPost ->
+                                            nav.navigate(FullsizePostDestination(clickedPost.post.uri.atUri))
+                                        }
+                                    }
+                                    if (customFeedData != null && customFeedData.isNotEmpty() && viewModel.hasMoreCustomFeeds[AtUri(
+                                            feedId
+                                        )] == true
+                                    ) {
+                                        item {
+                                            LoadMore(feedId + customFeedData.size) {
+                                                viewModel.loadMoreCustomFeed(AtUri(feedId))
+                                            }
+                                        }
+                                    } else {
+                                        item {
+                                            Spacer(modifier = Modifier.height(150.dp))
+                                        }
+                                    }
+                                } else {
+                                    Loading()
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // LAYER 2: TRANSLATING HEADER (Tabs & Progress)
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .graphicsLayer {
+                        // Move this entire column based on scroll delta
+                        translationY = headerOffsetHeightPx.floatValue
+                    }
+                    .zIndex(2f)
             ) {
-                if (error != null) {
-                    item {
-                        Icon(
-                            Icons.Rounded.Error,
-                            contentDescription = "Error",
-                            modifier = Modifier
-                                .padding(bottom = 12.dp)
-                                .size(40.dp)
+                // Spacer for fixed logo area
+                Box(
+                    modifier = Modifier
+                        .statusBarsPadding()
+                        .height(logoAreaHeight)
+                )
+
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(MaterialTheme.colorScheme.surface)
+                ) {
+                    val slideDistancePx = with(LocalDensity.current) { 36.dp.toPx().toInt() }
+
+                    AnimatedVisibility(
+                        visible = feedWorkerInfo != null &&
+                                feedWorkerInfo.state == WorkInfo.State.RUNNING,
+                        enter = fadeIn() + slideInVertically(
+                            initialOffsetY = { -slideDistancePx }
+                        ),
+                        exit = fadeOut() + slideOutVertically(
+                            targetOffsetY = { slideDistancePx }
                         )
+                    ) {
+                        FeedWorkerProgressDisplay(feedWorkerInfo = feedWorkerInfo)
                     }
-                    item {
-                        Text(
-                            text = "Failed to fetch your feed",
-                            //color = MaterialTheme.colorScheme.error,
-                            style = MaterialTheme.typography.titleLarge
-                        )
-                    }
-                    item {
+
+                    if (feeds.isNotEmpty()) {
                         Box(
                             modifier = Modifier
-                                .padding(16.dp)
-                                .background(
-                                    MaterialTheme.colorScheme.surfaceContainerHigh,
-                                    MaterialTheme.shapes.medium
-                                )
-                                .border(
-                                    1.dp,
-                                    MaterialTheme.colorScheme.outline.copy(0.2f),
-                                    MaterialTheme.shapes.medium
-                                )
-                                .padding(16.dp)
+                                .fillMaxWidth()
+                                .onGloballyPositioned {
+                                    // Capture height of everything that should scroll away
+                                    tabRowHeightPx.floatValue = it.size.height.toFloat()
+                                }
                         ) {
-                            Text(
-                                text = error,
-                            )
-                        }
-                    }
-                } else {
-                    item {
-                        Spacer(modifier = Modifier.height(50.dp))
-                    }
-                    item {
-                        val slideDistancePx = with(LocalDensity.current) { 36.dp.toPx().toInt() }
-
-                        AnimatedVisibility(
-                            visible = feedWorkerInfo != null &&
-                                    feedWorkerInfo.state == WorkInfo.State.RUNNING,
-                            enter = fadeIn() + slideInVertically(
-                                initialOffsetY = { -slideDistancePx }  // Starts ABOVE and slides down
-                            ),
-                            exit = fadeOut() + slideOutVertically(
-                                targetOffsetY = { slideDistancePx }  // Exits sliding DOWN
-                            )
-                        ) {
-                            FeedWorkerProgressDisplay(feedWorkerInfo = feedWorkerInfo)
-                        }
-                    }
-                    if (feeds.isNotEmpty()) {
-                        item {
                             PrimaryScrollableTabRow(
-                                selectedTabIndex = safeSelectedDestination,
+                                selectedTabIndex = pagerState.currentPage,
                                 edgePadding = 0.dp,
                                 modifier = Modifier.fillMaxWidth(),
                             ) {
                                 feeds.forEachIndexed { index, destination ->
                                     Tab(
-                                        selected = safeSelectedDestination == index,
+                                        selected = pagerState.currentPage == index,
                                         onClick = {
-                                            if (selectedDestination != index) {
-                                                selectedDestination = index
-                                                prefs.set(AppPrefs.DefaultFeed, index)
-
-                                                if (index < feeds.size) {
-                                                    val feedId = feeds[index].first
-                                                    when (feeds[index].second) {
-                                                        is FeedItem.Following, FeedItem.ForYou -> viewModel.fetchFeed()
-                                                        is FeedItem.FeedGenerator, is FeedItem.List -> viewModel.fetchCustomFeed(
-                                                            AtUri(feedId),
-                                                            isRefresh = true
-                                                        )
-                                                    }
-                                                }
+                                            coroutineScope.launch {
+                                                pagerState.animateScrollToPage(index)
                                             }
                                         },
                                         text = {
@@ -451,216 +693,105 @@ fun Feed(nav: DestinationsNavigator) {
                                 }
                             }
                         }
-                    }
-                    if (viewModel.isFetchingUserFeeds.value && feeds.isEmpty()) {
-                        Loading()
-                    }
-                    val followingFeedPosition =
-                        feeds.indexOfFirst { it.second is FeedItem.Following }
-                    val forYouFeedPosition = feeds.indexOfFirst { it.second is FeedItem.ForYou }
-                    if (feeds.isNotEmpty() && safeSelectedDestination == followingFeedPosition) {
-                        if (followingFeedData != null) {
-                            items(
-                                items = followingFeedData,
-                                key = { it.post.uri.atUri }
-                            ) {
-                                PostComponent(it, nav) {
-                                    nav.navigate(FullsizePostDestination(it.post.uri.atUri))
-                                }
-                            }
-                            if (followingFeedData.isNotEmpty() && viewModel.hasMoreFollowing.value) {
-                                item {
-                                    LoadMore(followingFeedData.size) {
-                                        viewModel.loadMoreFollowingFeed()
-                                    }
-                                }
-                            }
-                        } else {
+                    } else if (viewModel.isFetchingUserFeeds.value) {
+                        LazyColumn(modifier = Modifier.fillMaxSize()) {
                             Loading()
-                        }
-                    } else if (feeds.isNotEmpty() && safeSelectedDestination == forYouFeedPosition) {
-                        if (!forYouFeedData.isNullOrEmpty()) {
-                            items(
-                                items = forYouFeedData,
-                                key = { it.post.post.uri.atUri }
-                            ) {
-                                PostComponent(it.post.post, nav, discoveryContext = {
-                                    PostInsightsContext(
-                                        it.feedInfo
-                                    )
-                                }) {
-                                    nav.navigate(FullsizePostDestination(it.post.post.uri.atUri))
-                                }
-                            }
-                            if (forYouFeedData.isNotEmpty() && viewModel.hasMoreForYou.value) {
-                                item {
-                                    LoadMore(forYouFeedData.size) {
-                                        viewModel.loadMoreForYouFeeds()
-                                    }
-                                }
-                            }
-                        } else if (forYouFeedData != null && forYouFeedData.isEmpty()) {
-                            item {
-                                Box(
-                                    modifier = Modifier.fillMaxSize(),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text(
-                                        text = "No posts available",
-                                        style = MaterialTheme.typography.bodyLarge,
-                                        modifier = Modifier.padding(16.dp)
-                                    )
-                                }
-                            }
-                            item {
-                                Button(
-                                    onClick = {
-                                        WorkManager.getInstance(context)
-                                            .enqueueImmediateWorkers()
-                                    }
-                                ) {
-                                    Text("Generate For You Feed")
-                                }
-                            }
-                        } else {
-                            Loading()
-                        }
-                    } else if (feeds.isNotEmpty()) {
-                        // Custom Feed
-                        if (safeSelectedDestination < feeds.size) {
-                            val currentFeed = feeds[safeSelectedDestination]
-                            val feedId = currentFeed.first
-                            when (val item = currentFeed.second) {
-                                is FeedItem.FeedGenerator, is FeedItem.List -> {
-                                    if (!customFeedData.isNullOrEmpty()) {
-                                        items(
-                                            items = customFeedData,
-                                            key = { it.post.uri.atUri }
-                                        ) {
-                                            PostComponent(it, nav) {
-                                                nav.navigate(FullsizePostDestination(it.post.uri.atUri))
-                                            }
-                                        }
-                                        if (customFeedData.isNotEmpty() && viewModel.hasMoreCustomFeed.value) {
-                                            item {
-                                                LoadMore(feedId + customFeedData.size) {
-                                                    viewModel.loadMoreCustomFeed(AtUri(feedId))
-                                                }
-                                            }
-                                        } else {
-                                            item {
-                                                Spacer(modifier = Modifier.height(150.dp))
-                                            }
-                                        }
-                                    } else {
-                                        // Trigger fetch if null (e.g. initial load if logic above failed or just safe guard)
-                                        item {
-                                            LaunchedEffect(feedId) {
-                                                viewModel.fetchCustomFeed(
-                                                    AtUri(feedId),
-                                                    isRefresh = true
-                                                )
-                                            }
-                                        }
-                                        Loading()
-                                    }
-                                }
-
-                                else -> {}
-                            }
                         }
                     }
                 }
             }
 
-            TopBarBackground(
-                modifier = Modifier.zIndex(2f)
-            )
-
-            Column(
+            // LAYER 3: FIXED TOP BAR (Mindsky Logo & Buttons)
+            Surface(
+                color = MaterialTheme.colorScheme.surface,
                 modifier = Modifier
-                    .align(Alignment.TopCenter)
                     .fillMaxWidth()
-                    .zIndex(3f) // Above TopBarBackground
+                    .graphicsLayer {
+                        translationY = headerOffsetHeightPx.floatValue
+                    }
+                    .zIndex(4f)
             ) {
-                TopBarInteractiveElements(
-                    listState = listState,
-                    onIconClick = {
-                        val currentTime = System.currentTimeMillis()
-                        if (isFetchingFromViewModel) {
-                            Log.d("Feed", "Already fetching feed, click ignored.")
-                        } else if (currentTime - lastFetchTime < 5000) {
-                            Log.d("Feed", "Fetched too recently, click ignored. Cooldown active.")
-                        } else {
-                            lastFetchTime = currentTime
-//                            coroutineScope.launch {
-//                                userFeeds.refresh?.invoke()
-//                            }
-                            if (feeds.isNotEmpty() && safeSelectedDestination < feeds.size) {
-                                val currentFeed = feeds[safeSelectedDestination]
-                                val feedId = currentFeed.first
-                                when (currentFeed.second) {
-                                    is FeedItem.Following, FeedItem.ForYou -> viewModel.fetchFeed(
-                                        isRefresh = true
-                                    )
+                Box(
+                    modifier = Modifier
+                        .statusBarsPadding()
+                        .height(logoAreaHeight)
+                ) {
+                    TopBarInteractiveElements(
+                        listState = currentListState,
+                        onIconClick = {
+                            val currentTime = System.currentTimeMillis()
+                            if (isFetchingFromViewModel) {
+                                Log.d("Feed", "Already fetching feed, click ignored.")
+                            } else if (currentTime - lastFetchTime < 5000) {
+                                Log.d("Feed", "Fetched too recently, click ignored. Cooldown active.")
+                            } else {
+                                lastFetchTime = currentTime
+                                if (feeds.isNotEmpty() && pagerState.currentPage < feeds.size) {
+                                    val currentFeed = feeds[pagerState.currentPage]
+                                    val feedId = currentFeed.first
+                                    when (currentFeed.second) {
+                                        is FeedItem.Following -> viewModel.fetchFeed(
+                                            isRefresh = true
+                                        )
 
-                                    is FeedItem.FeedGenerator, is FeedItem.List -> viewModel.fetchCustomFeed(
-                                        AtUri(feedId),
-                                        isRefresh = true
-                                    )
+                                        is FeedItem.ForYou -> viewModel.refreshForYouFeed()
+
+                                        is FeedItem.FeedGenerator, is FeedItem.List -> viewModel.fetchCustomFeed(
+                                            AtUri(feedId),
+                                            isRefresh = true
+                                        )
+                                    }
                                 }
                             }
-                        }
-                    },
-                    modifier = Modifier
-                )
+                        },
+                        modifier = Modifier.align(Alignment.Center)
+                    )
+
+                    TopBarButtons(headerOffsetHeightPx.floatValue, nav)
+                }
             }
 
-            // TopBarButtons (settings icon) uses internal zIndex(5f)
-            TopBarButtons(listState, nav)
+            // LAYER 4: THE FADE (Slides with Tabs)
+//            Box(
+//                modifier = Modifier
+//                    .fillMaxWidth()
+//                    .graphicsLayer {
+//                        // Position below the stationary logo area, then move with scroll
+//                        translationY = logoAreaHeightPx +
+//                                statusBarHeightPx +
+//                                headerOffsetHeightPx.floatValue +
+//                                tabRowHeightPx.floatValue
+//                    }
+//                    .height(20.dp)
+//                    .background(
+//                        Brush.verticalGradient(
+//                            colors = listOf(
+//                                MaterialTheme.colorScheme.surface,
+//                                Color.Transparent
+//                            )
+//                        )
+//                    )
+//                    .zIndex(3f)
+//            )
         }
     }
 }
 
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
-fun LoadMore(trigger: Any, onLoad: () -> Unit) {
-    LaunchedEffect(trigger) {
-        onLoad()
-    }
-
-    Column(
-        modifier = Modifier
-            .fillMaxWidth(),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        LoadingIndicator(
-            modifier = Modifier.padding(16.dp),
-        )
-        Spacer(
-            modifier = Modifier.height(130.dp)
-        )
-    }
-}
-
-@Composable
-fun TopBarButtons(listState: LazyListState, navigator: DestinationsNavigator) {
-    val scrollOffset = remember { derivedStateOf { listState.firstVisibleItemScrollOffset } }
-    val firstVisibleItemIndex = remember { derivedStateOf { listState.firstVisibleItemIndex } }
-    val shouldShow = firstVisibleItemIndex.value == 0 && scrollOffset.value < 150
+fun TopBarButtons(
+    headerOffset: Float,
+    navigator: DestinationsNavigator
+) {
     val hapticFeedback = LocalHapticFeedback.current
 
-    val offsetY by animateFloatAsState(
-        targetValue = if (shouldShow) 0f else -80f, // moves it up
-        label = "iconRowOffset"
-    )
-
+    // Fade out buttons as the header collapses
     val alpha by animateFloatAsState(
-        targetValue = if (shouldShow) 1f else 0f,
+        targetValue = if (headerOffset > -30f) 1f else 0f,
         label = "iconRowAlpha"
     )
 
     var isAccountSwitcherOpen by remember { mutableStateOf(false) }
+    var isAccountSheetOpen by remember { mutableStateOf(false) }
 
     AccountSwitcherSheet(
         isOpen = isAccountSwitcherOpen,
@@ -671,13 +802,22 @@ fun TopBarButtons(listState: LazyListState, navigator: DestinationsNavigator) {
         }
     )
 
+    AccountSheet(
+        isOpen = isAccountSheetOpen,
+        onAccountSwitch = {
+            hapticFeedback.performHapticFeedback(HapticFeedbackType.ContextClick)
+            //isAccountSheetOpen = false
+            isAccountSwitcherOpen = true
+        },
+        onDismiss = { isAccountSheetOpen = false }
+    )
+
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp)
-            .offset { IntOffset(x = 0, y = offsetY.toInt()) }
             .graphicsLayer { this.alpha = alpha }
-            .zIndex(5f) // above top bar background
+            .zIndex(5f)
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -692,7 +832,7 @@ fun TopBarButtons(listState: LazyListState, navigator: DestinationsNavigator) {
                     modifier = Modifier
                         .size(30.dp),
                     onAvatarClick = {
-                        navigator.navigate(MyProfileDestination)
+                        isAccountSheetOpen = true
                     },
                     onAvatarLongClick = {
                         isAccountSwitcherOpen = true
@@ -719,7 +859,7 @@ fun ProfileAvatar(
     enabled: Boolean = true,
     onAvatarClick: () -> Unit,
     onAvatarLongClick: () -> Unit = {},
-){
+) {
     val hapticFeedback = LocalHapticFeedback.current
     val profileModel = LocalProfileModel.current
     val profileUiState by profileModel.uiState.collectAsState()
