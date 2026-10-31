@@ -45,7 +45,7 @@ class OAuthClient(
 
     companion object {
         private const val TAG = "OAuthClient"
-        private const val REDIRECT_URI = "https://aster.kittens.fyi/oauth/callback"
+        private const val REDIRECT_URI = "fyi.kittens.aster:/oauth/callback"
         private const val CLIENT_ID = "https://aster.kittens.fyi/client-metadata.json"
     }
 

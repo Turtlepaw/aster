@@ -2,8 +2,7 @@
   "client_id": "https://aster.kittens.fyi/client-metadata.json",
   "client_name": "Aster",
   "redirect_uris": [
-    "https://aster.kittens.fyi/oauth/callback",
-    "fyi.kittens.bsky:/oauth/callback"
+    "fyi.kittens.aster:/oauth/callback"
   ],
   "grant_types": ["authorization_code", "refresh_token"],
   "response_types": ["code"],

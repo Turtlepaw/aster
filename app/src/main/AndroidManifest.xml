@@ -100,6 +100,12 @@
                     android:host="oauth"
                     android:path="/callback" />
             </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="fyi.kittens.aster" />
+            </intent-filter>
         </activity>
 
         <!-- Add the service definition for WorkManager -->
